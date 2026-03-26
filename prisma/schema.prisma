@@ -1,0 +1,369 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum ApiKeyScope {
+  FULL_ACCESS
+  READ_ONLY
+  INGEST
+}
+
+enum EmailStatus {
+  SUBSCRIBED
+  UNSUBSCRIBED
+  BOUNCED
+  COMPLAINED
+  PENDING
+}
+
+enum SegmentType {
+  DYNAMIC
+  STATIC
+  GA4
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  SENDING
+  SENT
+  PAUSED
+  CANCELLED
+}
+
+enum CampaignType {
+  REGULAR
+  AB_TEST
+}
+
+enum EmailEventType {
+  SENT
+  DELIVERED
+  OPENED
+  CLICKED
+  BOUNCED
+  UNSUBSCRIBED
+  COMPLAINED
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  FULFILLED
+  CANCELLED
+  REFUNDED
+}
+
+model Tenant {
+  id            String         @id @default(cuid())
+  name          String
+  slug          String         @unique
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  users         User[]
+  refreshTokens RefreshToken[]
+  apiKeys       ApiKey[]
+  memberships   Membership[]
+
+  @@map("tenants")
+}
+
+model User {
+  id            String         @id @default(cuid())
+  tenantId      String
+  email         String         @unique
+  passwordHash  String
+  firstName     String?
+  lastName      String?
+  role          UserRole       @default(MEMBER)
+  isActive      Boolean        @default(true)
+  lastLoginAt   DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  refreshTokens RefreshToken[]
+  memberships   Membership[]
+
+  @@index([tenantId])
+  @@index([tenantId, role])
+  @@map("users")
+}
+
+model RefreshToken {
+  id                String      @id @default(cuid())
+  tenantId          String
+  userId            String
+  tokenHash         String      @unique
+  tokenFamily       String
+  expiresAt         DateTime
+  revokedAt         DateTime?
+  createdAt         DateTime    @default(now())
+  replacedByTokenId String?
+  userAgent         String?
+  ipAddress         String?
+
+  tenant            Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user              User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([tokenFamily])
+  @@index([expiresAt])
+  @@index([revokedAt])
+  @@map("refresh_tokens")
+}
+
+model ApiKey {
+  id          String       @id @default(cuid())
+  tenantId    String
+  name        String
+  prefix      String
+  keyHash     String       @unique
+  scope       ApiKeyScope  @default(FULL_ACCESS)
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([prefix])
+  @@index([expiresAt])
+  @@index([revokedAt])
+  @@map("api_keys")
+}
+
+model Membership {
+  id        String    @id @default(uuid())
+  tenantId  String
+  userId    String
+  role      UserRole  @default(MEMBER)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId])
+  @@index([tenantId])
+  @@index([userId])
+  @@map("memberships")
+}
+
+model Contact {
+  id             String          @id @default(uuid())
+  tenantId       String
+
+  email          String
+  firstName      String?
+  lastName       String?
+  phone          String?
+
+  emailStatus    EmailStatus     @default(PENDING)
+  totalRevenue   Decimal         @default(0) @db.Decimal(12, 2)
+  totalOrders    Int             @default(0)
+
+  firstOrderAt   DateTime?
+  lastOrderAt    DateTime?
+  bouncedAt      DateTime?
+  complainedAt   DateTime?
+
+  healthScore    Json?
+
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  orders         Order[]
+  segmentMembers SegmentMember[]
+  emailEvents    EmailEvent[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@index([tenantId, emailStatus])
+  @@index([tenantId, totalRevenue])
+  @@index([tenantId, totalOrders])
+  @@index([tenantId, firstOrderAt])
+  @@index([tenantId, lastOrderAt])
+}
+
+model Order {
+  id          String       @id @default(uuid())
+  contactId   String
+  externalId  String?      @unique
+  orderNumber String?
+  status      OrderStatus  @default(PENDING)
+  totalAmount Decimal      @db.Decimal(12, 2)
+  subtotal    Decimal?     @db.Decimal(12, 2)
+  currency    String
+  placedAt    DateTime
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  contact     Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  items       OrderItem[]
+
+  @@index([contactId])
+  @@index([status])
+  @@index([placedAt])
+}
+
+model OrderItem {
+  id         String    @id @default(uuid())
+  orderId    String
+  name       String
+  quantity   Int
+  unitPrice  Decimal   @db.Decimal(12, 2)
+  totalPrice Decimal   @db.Decimal(12, 2)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  order      Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+}
+
+model Segment {
+  id            String        @id @default(uuid())
+  tenantId      String
+
+  name          String
+  description   String?
+  type          SegmentType
+  conditions    Json
+
+  contactCount  Int           @default(0)
+  lastSyncAt    DateTime?
+
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  members       SegmentMember[]
+  campaigns     Campaign[]
+
+  @@index([tenantId])
+  @@index([tenantId, type])
+  @@unique([tenantId, name])
+}
+
+model SegmentMember {
+  segmentId     String
+  contactId     String
+  addedAt       DateTime      @default(now())
+
+  segment       Segment       @relation(fields: [segmentId], references: [id], onDelete: Cascade)
+  contact       Contact       @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@id([segmentId, contactId])
+  @@index([contactId])
+}
+
+model Product {
+  id          String    @id @default(uuid())
+  tenantId    String
+  externalId  String
+  name        String
+  sku         String?
+  price       Decimal   @db.Decimal(12, 2)
+  imageUrl    String?
+  category    String?
+  tags        String[]  @default([])
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([tenantId, externalId])
+  @@index([tenantId])
+  @@index([tenantId, category])
+  @@index([tenantId, isActive])
+  @@map("products")
+}
+
+model Campaign {
+  id                 String           @id @default(cuid())
+  tenantId           String
+  name               String
+  subject            String
+  previewText        String?
+  fromName           String
+  fromEmail          String
+  replyTo            String?
+  htmlContent        String
+  textContent        String?
+  status             CampaignStatus   @default(DRAFT)
+  type               CampaignType     @default(REGULAR)
+  scheduledAt        DateTime?
+  sentAt             DateTime?
+
+  segmentId          String
+  segment            Segment          @relation(fields: [segmentId], references: [id], onDelete: Restrict)
+
+  totalSent          Int              @default(0)
+  totalDelivered     Int              @default(0)
+  totalOpened        Int              @default(0)
+  totalClicked       Int              @default(0)
+  totalBounced       Int              @default(0)
+  totalUnsubscribed  Int              @default(0)
+  totalComplained    Int              @default(0)
+  revenue            Decimal          @default(0) @db.Decimal(12, 2)
+
+  abTests            AbTest[]
+  emailEvents        EmailEvent[]
+
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@index([tenantId, status])
+  @@index([tenantId, segmentId])
+  @@index([scheduledAt])
+}
+
+model AbTest {
+  id            String    @id @default(cuid())
+  campaignId    String
+  campaign      Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  variantName   String
+  subject       String
+  htmlContent   String
+  splitPercent  Int
+  isWinner      Boolean   @default(false)
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([campaignId])
+}
+
+model EmailEvent {
+  id            String          @id @default(cuid())
+  tenantId      String
+  campaignId    String
+  campaign      Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contactId     String
+  contact       Contact         @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  type          EmailEventType
+  provider      String?
+  providerId    String?
+  metadata      Json?
+  createdAt     DateTime        @default(now())
+
+  @@index([tenantId, campaignId])
+  @@index([tenantId, contactId])
+  @@index([type])
+  @@index([createdAt])
+}
