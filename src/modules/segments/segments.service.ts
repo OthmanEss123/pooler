@@ -5,6 +5,8 @@ import {
 } from '@nestjs/common';
 import { Prisma, SegmentType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma/prisma.service';
+import { FlowTriggerType } from '../flows/dto/create-flow.dto';
+import { FlowsService } from '../flows/flows.service';
 import { CreateSegmentDto } from './dto/create-segment.dto';
 import { SegmentEvaluator } from './engines/segment-evaluator';
 import type { SegmentConditionGroup } from './types/segment.types';
@@ -19,6 +21,7 @@ export class SegmentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly evaluator: SegmentEvaluator,
+    private readonly flowsService: FlowsService,
   ) {}
 
   async create(tenantId: string, dto: CreateSegmentDto) {
@@ -121,6 +124,15 @@ export class SegmentsService {
     const conditions = segment.conditions as unknown as SegmentConditionGroup;
     this.evaluator.validateConditions(conditions);
 
+    const existingMembers = await this.prisma.segmentMember.findMany({
+      where: {
+        segmentId: segment.id,
+      },
+    });
+    const existingMemberIds = new Set(
+      existingMembers.map((member) => member.contactId),
+    );
+
     const where = this.evaluator.buildWhere(tenantId, conditions);
     const contacts = await this.prisma.contact.findMany({
       where,
@@ -133,6 +145,9 @@ export class SegmentsService {
       segmentId: segment.id,
       contactId: contact.id,
     }));
+    const newlyAddedContactIds = contacts
+      .map((contact) => contact.id)
+      .filter((contactId) => !existingMemberIds.has(contactId));
 
     await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       await tx.segmentMember.deleteMany({
@@ -158,6 +173,19 @@ export class SegmentsService {
         },
       });
     });
+
+    if (newlyAddedContactIds.length > 0) {
+      const flows = await this.flowsService.findActiveFlowsByTrigger(
+        tenantId,
+        FlowTriggerType.SEGMENT_ENTER,
+      );
+
+      for (const contactId of newlyAddedContactIds) {
+        for (const flow of flows) {
+          await this.flowsService.triggerFlow(tenantId, flow.id, contactId);
+        }
+      }
+    }
 
     return {
       segmentId: segment.id,

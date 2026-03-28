@@ -9,10 +9,15 @@ import { BulkUpsertContactsDto } from './dto/bulk-upsert-contacts.dto';
 import { CreateContactDto } from './dto/create-contact.dto';
 import { QueryContactsDto } from './dto/query-contacts.dto';
 import { UpdateContactDto } from './dto/update-contact.dto';
+import { FlowTriggerType } from '../flows/dto/create-flow.dto';
+import { FlowsService } from '../flows/flows.service';
 
 @Injectable()
 export class ContactsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly flowsService: FlowsService,
+  ) {}
 
   async create(tenantId: string, dto: CreateContactDto) {
     const email = dto.email.trim().toLowerCase();
@@ -25,7 +30,7 @@ export class ContactsService {
       throw new ConflictException('Contact email already exists');
     }
 
-    return this.prisma.contact.create({
+    const contact = await this.prisma.contact.create({
       data: {
         tenantId,
         email,
@@ -34,6 +39,17 @@ export class ContactsService {
         phone: dto.phone,
       },
     });
+
+    const flows = await this.flowsService.findActiveFlowsByTrigger(
+      tenantId,
+      FlowTriggerType.CONTACT_CREATED,
+    );
+
+    for (const flow of flows) {
+      await this.flowsService.triggerFlow(tenantId, flow.id, contact.id);
+    }
+
+    return contact;
   }
 
   async bulkUpsert(tenantId: string, dto: BulkUpsertContactsDto) {

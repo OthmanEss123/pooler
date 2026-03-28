@@ -4,6 +4,8 @@ import { PrismaService } from '../../database/prisma/prisma.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { QueryOrdersDto } from './dto/query-orders.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
+import { FlowTriggerType } from '../flows/dto/create-flow.dto';
+import { FlowsService } from '../flows/flows.service';
 
 type PrismaLike = PrismaService | Prisma.TransactionClient;
 
@@ -14,7 +16,10 @@ type OrderMetricRow = {
 
 @Injectable()
 export class OrdersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly flowsService: FlowsService,
+  ) {}
 
   async create(tenantId: string, dto: CreateOrderDto) {
     const result = await this.prisma.$transaction(async (tx) => {
@@ -66,6 +71,14 @@ export class OrdersService {
       return created;
     });
 
+    const triggerTypes = [FlowTriggerType.ORDER_CREATED];
+
+    if (this.isPostPurchaseStatus(result.status)) {
+      triggerTypes.unshift(FlowTriggerType.POST_PURCHASE);
+    }
+
+    await this.triggerFlows(tenantId, result.contactId, triggerTypes);
+
     return result;
   }
 
@@ -111,7 +124,7 @@ export class OrdersService {
   async updateStatus(tenantId: string, id: string, dto: UpdateOrderStatusDto) {
     const existing = await this.prisma.order.findFirst({
       where: { id, contact: { tenantId } },
-      select: { id: true, contactId: true },
+      select: { id: true, contactId: true, status: true },
     });
 
     if (!existing) {
@@ -125,6 +138,15 @@ export class OrdersService {
     });
 
     await this.recalculateContactMetrics(this.prisma, existing.contactId);
+
+    if (
+      !this.isPostPurchaseStatus(existing.status) &&
+      this.isPostPurchaseStatus(order.status)
+    ) {
+      await this.triggerFlows(tenantId, existing.contactId, [
+        FlowTriggerType.POST_PURCHASE,
+      ]);
+    }
 
     return order;
   }
@@ -149,6 +171,27 @@ export class OrdersService {
         email: normalizedEmail,
       },
     });
+  }
+
+  private isPostPurchaseStatus(status: OrderStatus) {
+    return status === OrderStatus.PAID || status === OrderStatus.FULFILLED;
+  }
+
+  private async triggerFlows(
+    tenantId: string,
+    contactId: string,
+    triggerTypes: FlowTriggerType[],
+  ) {
+    for (const type of triggerTypes) {
+      const flows = await this.flowsService.findActiveFlowsByTrigger(
+        tenantId,
+        type,
+      );
+
+      for (const flow of flows) {
+        await this.flowsService.triggerFlow(tenantId, flow.id, contactId);
+      }
+    }
   }
 
   private async recalculateContactMetrics(

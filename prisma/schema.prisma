@@ -65,38 +65,37 @@ enum OrderStatus {
 }
 
 model Tenant {
-  id            String         @id @default(cuid())
-  name          String
-  slug          String         @unique
-  isActive      Boolean        @default(true)
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  users         User[]
-  refreshTokens RefreshToken[]
-  apiKeys       ApiKey[]
-  memberships   Membership[]
-  insights             Insight[]
-  healthScores         CustomerHealthScore[]
-  flows                Flow[]
-  executions           FlowExecution[]
+  users          User[]
+  refreshTokens  RefreshToken[]
+  apiKeys        ApiKey[]
+  memberships    Membership[]
+  insights       Insight[]
+  healthScores   CustomerHealthScore[]
+  flows          Flow[]
+  flowExecutions FlowExecution[]
 
   @@map("tenants")
 }
 
-
 model User {
-  id            String         @id @default(cuid())
-  tenantId      String
-  email         String         @unique
-  passwordHash  String
-  firstName     String?
-  lastName      String?
-  role          UserRole       @default(MEMBER)
-  isActive      Boolean        @default(true)
-  lastLoginAt   DateTime?
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  id           String    @id @default(cuid())
+  tenantId     String
+  email        String    @unique
+  passwordHash String
+  firstName    String?
+  lastName     String?
+  role         UserRole  @default(MEMBER)
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   refreshTokens RefreshToken[]
@@ -108,20 +107,20 @@ model User {
 }
 
 model RefreshToken {
-  id                String      @id @default(cuid())
+  id                String    @id @default(cuid())
   tenantId          String
   userId            String
-  tokenHash         String      @unique
+  tokenHash         String    @unique
   tokenFamily       String
   expiresAt         DateTime
   revokedAt         DateTime?
-  createdAt         DateTime    @default(now())
+  createdAt         DateTime  @default(now())
   replacedByTokenId String?
   userAgent         String?
   ipAddress         String?
 
-  tenant            Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user              User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
   @@index([userId])
@@ -132,19 +131,19 @@ model RefreshToken {
 }
 
 model ApiKey {
-  id          String       @id @default(cuid())
-  tenantId    String
-  name        String
-  prefix      String
-  keyHash     String       @unique
-  scope       ApiKeyScope  @default(FULL_ACCESS)
-  lastUsedAt  DateTime?
-  expiresAt   DateTime?
-  revokedAt   DateTime?
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  id         String      @id @default(cuid())
+  tenantId   String
+  name       String
+  prefix     String
+  keyHash    String      @unique
+  scope      ApiKeyScope @default(FULL_ACCESS)
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
 
-  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
   @@index([prefix])
@@ -154,15 +153,15 @@ model ApiKey {
 }
 
 model Membership {
-  id        String    @id @default(uuid())
+  id        String   @id @default(uuid())
   tenantId  String
   userId    String
-  role      UserRole  @default(MEMBER)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  role      UserRole @default(MEMBER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, userId])
   @@index([tenantId])
@@ -171,27 +170,27 @@ model Membership {
 }
 
 model Contact {
-  id             String          @id @default(uuid())
-  tenantId       String
+  id       String @id @default(uuid())
+  tenantId String
 
-  email          String
-  firstName      String?
-  lastName       String?
-  phone          String?
+  email     String
+  firstName String?
+  lastName  String?
+  phone     String?
 
-  emailStatus    EmailStatus     @default(PENDING)
-  totalRevenue   Decimal         @default(0) @db.Decimal(12, 2)
-  totalOrders    Int             @default(0)
+  emailStatus  EmailStatus @default(PENDING)
+  totalRevenue Decimal     @default(0) @db.Decimal(12, 2)
+  totalOrders  Int         @default(0)
 
-  firstOrderAt   DateTime?
-  lastOrderAt    DateTime?
-  bouncedAt      DateTime?
-  complainedAt   DateTime?
+  firstOrderAt DateTime?
+  lastOrderAt  DateTime?
+  bouncedAt    DateTime?
+  complainedAt DateTime?
 
-  healthScore   CustomerHealthScore?
+  healthScore CustomerHealthScore?
 
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   orders         Order[]
   segmentMembers SegmentMember[]
@@ -208,20 +207,20 @@ model Contact {
 }
 
 model Order {
-  id          String       @id @default(uuid())
+  id          String      @id @default(uuid())
   contactId   String
-  externalId  String?      @unique
+  externalId  String?     @unique
   orderNumber String?
-  status      OrderStatus  @default(PENDING)
-  totalAmount Decimal      @db.Decimal(12, 2)
-  subtotal    Decimal?     @db.Decimal(12, 2)
+  status      OrderStatus @default(PENDING)
+  totalAmount Decimal     @db.Decimal(12, 2)
+  subtotal    Decimal?    @db.Decimal(12, 2)
   currency    String
   placedAt    DateTime
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
 
-  contact     Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  items       OrderItem[]
+  contact Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  items   OrderItem[]
 
   @@index([contactId])
   @@index([status])
@@ -229,68 +228,68 @@ model Order {
 }
 
 model OrderItem {
-  id         String    @id @default(uuid())
+  id         String   @id @default(uuid())
   orderId    String
   name       String
   quantity   Int
-  unitPrice  Decimal   @db.Decimal(12, 2)
-  totalPrice Decimal   @db.Decimal(12, 2)
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  unitPrice  Decimal  @db.Decimal(12, 2)
+  totalPrice Decimal  @db.Decimal(12, 2)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  order      Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId])
 }
 
 model Segment {
-  id            String        @id @default(uuid())
-  tenantId      String
+  id       String @id @default(uuid())
+  tenantId String
 
-  name          String
-  description   String?
-  type          SegmentType
-  conditions    Json
+  name        String
+  description String?
+  type        SegmentType
+  conditions  Json
 
-  contactCount  Int           @default(0)
-  lastSyncAt    DateTime?
+  contactCount Int       @default(0)
+  lastSyncAt   DateTime?
 
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  members       SegmentMember[]
-  campaigns     Campaign[]
+  members   SegmentMember[]
+  campaigns Campaign[]
 
+  @@unique([tenantId, name])
   @@index([tenantId])
   @@index([tenantId, type])
-  @@unique([tenantId, name])
 }
 
 model SegmentMember {
-  segmentId     String
-  contactId     String
-  addedAt       DateTime      @default(now())
+  segmentId String
+  contactId String
+  addedAt   DateTime @default(now())
 
-  segment       Segment       @relation(fields: [segmentId], references: [id], onDelete: Cascade)
-  contact       Contact       @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  segment Segment @relation(fields: [segmentId], references: [id], onDelete: Cascade)
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
 
   @@id([segmentId, contactId])
   @@index([contactId])
 }
 
 model Product {
-  id          String    @id @default(uuid())
-  tenantId    String
-  externalId  String
-  name        String
-  sku         String?
-  price       Decimal   @db.Decimal(12, 2)
-  imageUrl    String?
-  category    String?
-  tags        String[]  @default([])
-  isActive    Boolean   @default(true)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id         String   @id @default(uuid())
+  tenantId   String
+  externalId String
+  name       String
+  sku        String?
+  price      Decimal  @db.Decimal(12, 2)
+  imageUrl   String?
+  category   String?
+  tags       String[] @default([])
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   @@unique([tenantId, externalId])
   @@index([tenantId])
@@ -300,38 +299,38 @@ model Product {
 }
 
 model Campaign {
-  id                 String           @id @default(cuid())
-  tenantId           String
-  name               String
-  subject            String
-  previewText        String?
-  fromName           String
-  fromEmail          String
-  replyTo            String?
-  htmlContent        String
-  textContent        String?
-  status             CampaignStatus   @default(DRAFT)
-  type               CampaignType     @default(REGULAR)
-  scheduledAt        DateTime?
-  sentAt             DateTime?
+  id          String         @id @default(cuid())
+  tenantId    String
+  name        String
+  subject     String
+  previewText String?
+  fromName    String
+  fromEmail   String
+  replyTo     String?
+  htmlContent String
+  textContent String?
+  status      CampaignStatus @default(DRAFT)
+  type        CampaignType   @default(REGULAR)
+  scheduledAt DateTime?
+  sentAt      DateTime?
 
-  segmentId          String
-  segment            Segment          @relation(fields: [segmentId], references: [id], onDelete: Restrict)
+  segmentId String
+  segment   Segment @relation(fields: [segmentId], references: [id], onDelete: Restrict)
 
-  totalSent          Int              @default(0)
-  totalDelivered     Int              @default(0)
-  totalOpened        Int              @default(0)
-  totalClicked       Int              @default(0)
-  totalBounced       Int              @default(0)
-  totalUnsubscribed  Int              @default(0)
-  totalComplained    Int              @default(0)
-  revenue            Decimal          @default(0) @db.Decimal(12, 2)
+  totalSent         Int     @default(0)
+  totalDelivered    Int     @default(0)
+  totalOpened       Int     @default(0)
+  totalClicked      Int     @default(0)
+  totalBounced      Int     @default(0)
+  totalUnsubscribed Int     @default(0)
+  totalComplained   Int     @default(0)
+  revenue           Decimal @default(0) @db.Decimal(12, 2)
 
-  abTests            AbTest[]
-  emailEvents        EmailEvent[]
+  abTests     AbTest[]
+  emailEvents EmailEvent[]
 
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([tenantId, status])
   @@index([tenantId, segmentId])
@@ -339,40 +338,41 @@ model Campaign {
 }
 
 model AbTest {
-  id            String    @id @default(cuid())
-  campaignId    String
-  campaign      Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  id         String   @id @default(cuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 
-  variantName   String
-  subject       String
-  htmlContent   String
-  splitPercent  Int
-  isWinner      Boolean   @default(false)
+  variantName  String
+  subject      String
+  htmlContent  String
+  splitPercent Int
+  isWinner     Boolean @default(false)
 
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([campaignId])
 }
 
 model EmailEvent {
-  id            String          @id @default(cuid())
-  tenantId      String
-  campaignId    String
-  campaign      Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  contactId     String
-  contact       Contact         @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  type          EmailEventType
-  provider      String?
-  providerId    String?
-  metadata      Json?
-  createdAt     DateTime        @default(now())
+  id         String         @id @default(cuid())
+  tenantId   String
+  campaignId String
+  campaign   Campaign       @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contactId  String
+  contact    Contact        @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  type       EmailEventType
+  provider   String?
+  providerId String?
+  metadata   Json?
+  createdAt  DateTime       @default(now())
 
   @@index([tenantId, campaignId])
   @@index([tenantId, contactId])
   @@index([type])
   @@index([createdAt])
 }
+
 enum InsightType {
   ANOMALY
   AD_WASTE
@@ -404,7 +404,7 @@ model Insight {
   expiresAt   DateTime?
   createdAt   DateTime    @default(now())
 
-  tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
   @@index([tenantId, type])
@@ -412,9 +412,9 @@ model Insight {
 }
 
 model CustomerHealthScore {
-  id             String      @id @default(cuid())
+  id             String     @id @default(cuid())
   tenantId       String
-  contactId      String      @unique
+  contactId      String     @unique
   segment        RfmSegment
   rfmScore       Int
   recencyScore   Int
@@ -422,15 +422,16 @@ model CustomerHealthScore {
   monetaryScore  Int
   churnRisk      Float
   predictedLtv   Float?
-  calculatedAt   DateTime    @default(now())
+  calculatedAt   DateTime   @default(now())
 
-  tenant         Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  contact        Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
   @@index([tenantId, segment])
   @@index([calculatedAt])
 }
+
 enum FlowStatus {
   DRAFT
   ACTIVE
@@ -454,41 +455,41 @@ enum StepStatus {
 }
 
 model Flow {
-  id          String      @id @default(cuid())
-  tenantId     String
-  name         String
-  description  String?
-  trigger      Json
-  nodes        Json
-  status       FlowStatus  @default(DRAFT)
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  id          String     @id @default(cuid())
+  tenantId    String
+  name        String
+  description String?
+  trigger     Json
+  nodes       Json
+  status      FlowStatus @default(DRAFT)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 
-  tenant       Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  executions   FlowExecution[]
+  tenant     Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  executions FlowExecution[]
 
   @@index([tenantId])
   @@index([tenantId, status])
 }
 
 model FlowExecution {
-  id               String               @id @default(cuid())
+  id               String              @id @default(cuid())
   flowId           String
   contactId        String
   tenantId         String
-  status           FlowExecutionStatus  @default(RUNNING)
-  currentStepIndex Int                  @default(0)
-  startedAt        DateTime             @default(now())
+  status           FlowExecutionStatus @default(RUNNING)
+  currentStepIndex Int                 @default(0)
+  startedAt        DateTime            @default(now())
   completedAt      DateTime?
   failedAt         DateTime?
   error            String?
-  createdAt        DateTime             @default(now())
-  updatedAt        DateTime             @updatedAt
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
 
-  flow             Flow                 @relation(fields: [flowId], references: [id], onDelete: Cascade)
-  contact          Contact              @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  tenant           Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  steps            FlowExecutionStep[]
+  flow    Flow                @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  contact Contact             @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tenant  Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  steps   FlowExecutionStep[]
 
   @@index([tenantId])
   @@index([flowId])
@@ -497,17 +498,17 @@ model FlowExecution {
 }
 
 model FlowExecutionStep {
-  id          String      @id @default(cuid())
+  id          String     @id @default(cuid())
   executionId String
   stepId      String
   type        String
-  status      StepStatus  @default(PENDING)
+  status      StepStatus @default(PENDING)
   executedAt  DateTime?
   result      Json?
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 
-  execution   FlowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  execution FlowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
 
   @@index([executionId])
   @@index([stepId])
