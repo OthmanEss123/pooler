@@ -76,9 +76,14 @@ model Tenant {
   refreshTokens RefreshToken[]
   apiKeys       ApiKey[]
   memberships   Membership[]
+  insights             Insight[]
+  healthScores         CustomerHealthScore[]
+  flows                Flow[]
+  executions           FlowExecution[]
 
   @@map("tenants")
 }
+
 
 model User {
   id            String         @id @default(cuid())
@@ -183,7 +188,7 @@ model Contact {
   bouncedAt      DateTime?
   complainedAt   DateTime?
 
-  healthScore    Json?
+  healthScore   CustomerHealthScore?
 
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
@@ -191,6 +196,7 @@ model Contact {
   orders         Order[]
   segmentMembers SegmentMember[]
   emailEvents    EmailEvent[]
+  executions     FlowExecution[]
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -366,4 +372,143 @@ model EmailEvent {
   @@index([tenantId, contactId])
   @@index([type])
   @@index([createdAt])
+}
+enum InsightType {
+  ANOMALY
+  AD_WASTE
+  REVENUE_FORECAST
+  SEGMENT_OPPORTUNITY
+  EMAIL_PERFORMANCE
+  PRODUCT_INTELLIGENCE
+}
+
+enum RfmSegment {
+  CHAMPION
+  LOYAL
+  POTENTIAL
+  NEW
+  AT_RISK
+  CANT_LOSE
+  LOST
+}
+
+model Insight {
+  id          String      @id @default(cuid())
+  tenantId    String
+  type        InsightType
+  title       String
+  description String?
+  data        Json?
+  impact      Decimal?    @db.Decimal(12, 2)
+  isRead      Boolean     @default(false)
+  expiresAt   DateTime?
+  createdAt   DateTime    @default(now())
+
+  tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, type])
+  @@index([createdAt])
+}
+
+model CustomerHealthScore {
+  id             String      @id @default(cuid())
+  tenantId       String
+  contactId      String      @unique
+  segment        RfmSegment
+  rfmScore       Int
+  recencyScore   Int
+  frequencyScore Int
+  monetaryScore  Int
+  churnRisk      Float
+  predictedLtv   Float?
+  calculatedAt   DateTime    @default(now())
+
+  tenant         Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact        Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, segment])
+  @@index([calculatedAt])
+}
+enum FlowStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum FlowExecutionStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum StepStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+model Flow {
+  id          String      @id @default(cuid())
+  tenantId     String
+  name         String
+  description  String?
+  trigger      Json
+  nodes        Json
+  status       FlowStatus  @default(DRAFT)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  tenant       Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  executions   FlowExecution[]
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+}
+
+model FlowExecution {
+  id               String               @id @default(cuid())
+  flowId           String
+  contactId        String
+  tenantId         String
+  status           FlowExecutionStatus  @default(RUNNING)
+  currentStepIndex Int                  @default(0)
+  startedAt        DateTime             @default(now())
+  completedAt      DateTime?
+  failedAt         DateTime?
+  error            String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  flow             Flow                 @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  contact          Contact              @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tenant           Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  steps            FlowExecutionStep[]
+
+  @@index([tenantId])
+  @@index([flowId])
+  @@index([contactId])
+  @@index([tenantId, status])
+}
+
+model FlowExecutionStep {
+  id          String      @id @default(cuid())
+  executionId String
+  stepId      String
+  type        String
+  status      StepStatus  @default(PENDING)
+  executedAt  DateTime?
+  result      Json?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  execution   FlowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@index([executionId])
+  @@index([stepId])
 }

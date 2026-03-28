@@ -17,6 +17,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { ProductsService } from './products.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { QueryProductsDto } from './dto/query-products.dto';
+import { UpdateProductDto } from './dto/update-product.dto';
 
 @UseGuards(RolesGuard)
 @Controller('products')
@@ -44,7 +45,7 @@ export class ProductsController {
   update(
     @CurrentTenant() tenantId: string,
     @Param('id') id: string,
-    @Body() dto: Partial<CreateProductDto>,
+    @Body() dto: UpdateProductDto,
   ) {
     return this.productsService.update(tenantId, id, dto);
   }

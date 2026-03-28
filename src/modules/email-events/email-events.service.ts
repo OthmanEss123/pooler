@@ -1,5 +1,6 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EmailEventType, Prisma } from '@prisma/client';
+import { ClickhouseService } from '../../database/clickhouse/clickhouse.service';
 import { PrismaService } from '../../database/prisma/prisma.service';
 import { TrackEmailEventDto } from './dto/track-email-event.dto';
 
@@ -10,9 +11,45 @@ const toInputJsonValue = (
     ? (JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue)
     : undefined;
 
+const getMetadataNumber = (
+  metadata: Record<string, unknown> | undefined,
+  key: string,
+): number | undefined => {
+  const value = metadata?.[key];
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  return undefined;
+};
+
+const getMetadataString = (
+  metadata: Record<string, unknown> | undefined,
+  key: string,
+): string | undefined => {
+  const value = metadata?.[key];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+};
+
+const normalizeOccurredAt = (occurredAt: string): string => {
+  const parsed = new Date(occurredAt);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return new Date().toISOString();
+  }
+
+  return parsed.toISOString();
+};
+
 @Injectable()
 export class EmailEventsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(EmailEventsService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly clickhouse: ClickhouseService,
+  ) {}
 
   async trackEvent(dto: TrackEmailEventDto, tenantId?: string) {
     const campaign = await this.prisma.campaign.findFirst({
@@ -35,6 +72,21 @@ export class EmailEventsService {
 
     if (!contact) {
       throw new NotFoundException('Contact not found');
+    }
+
+    if (dto.type !== EmailEventType.SENT) {
+      const existing = await this.prisma.emailEvent.findFirst({
+        where: {
+          tenantId: campaign.tenantId,
+          contactId: dto.contactId,
+          campaignId: dto.campaignId,
+          type: dto.type,
+        },
+      });
+
+      if (existing) {
+        return existing;
+      }
     }
 
     const campaignUpdates: Record<string, { increment: number }> = {};
@@ -63,8 +115,8 @@ export class EmailEventsService {
         break;
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      const emailEvent = await tx.emailEvent.create({
+    const emailEvent = await this.prisma.$transaction(async (tx) => {
+      const createdEmailEvent = await tx.emailEvent.create({
         data: {
           tenantId: campaign.tenantId,
           campaignId: dto.campaignId,
@@ -110,8 +162,44 @@ export class EmailEventsService {
         });
       }
 
-      return emailEvent;
+      return createdEmailEvent;
     });
+
+    const revenue =
+      dto.revenue ?? getMetadataNumber(dto.metadata, 'revenue') ?? 0;
+    const occurredAt = normalizeOccurredAt(
+      dto.occurredAt ??
+        getMetadataString(dto.metadata, 'occurredAt') ??
+        emailEvent.createdAt.toISOString(),
+    );
+
+    if (
+      process.env.NODE_ENV === 'test' &&
+      typeof this.clickhouse.insert !== 'function'
+    ) {
+      return emailEvent;
+    }
+
+    try {
+      await this.clickhouse.insert('email_events_log', [
+        {
+          tenant_id: campaign.tenantId,
+          campaign_id: dto.campaignId,
+          contact_id: dto.contactId,
+          type: dto.type,
+          revenue,
+          event_date: occurredAt.slice(0, 10),
+          occurred_at: occurredAt,
+        },
+      ]);
+    } catch (error) {
+      this.logger.error(
+        `Failed to mirror email event ${dto.type} for campaign=${dto.campaignId} into ClickHouse`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
+
+    return emailEvent;
   }
 
   async getEventsByContact(tenantId: string, contactId: string) {

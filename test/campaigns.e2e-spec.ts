@@ -442,6 +442,43 @@ const extendPrismaMock = () => {
       emailEvents.push(emailEvent);
       return emailEvent;
     }),
+    findFirst: jest.fn(
+      async ({
+        where,
+      }: {
+        where?: {
+          tenantId?: string;
+          contactId?: string;
+          campaignId?: string;
+          type?: string;
+        };
+      }) => {
+        return (
+          emailEvents.find((candidate) => {
+            if (where?.tenantId && candidate.tenantId !== where.tenantId) {
+              return false;
+            }
+
+            if (where?.contactId && candidate.contactId !== where.contactId) {
+              return false;
+            }
+
+            if (
+              where?.campaignId &&
+              candidate.campaignId !== where.campaignId
+            ) {
+              return false;
+            }
+
+            if (where?.type && candidate.type !== where.type) {
+              return false;
+            }
+
+            return true;
+          }) ?? null
+        );
+      },
+    ),
     findMany: jest.fn(
       async ({
         where,

@@ -7,6 +7,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma/prisma.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { QueryProductsDto } from './dto/query-products.dto';
+import { UpdateProductDto } from './dto/update-product.dto';
 
 @Injectable()
 export class ProductsService {
@@ -60,24 +61,27 @@ export class ProductsService {
 
   async findOne(tenantId: string, id: string) {
     const product = await this.prisma.product.findFirst({
-      where: { id, tenantId },
+      where: { id, tenantId, isActive: true },
     });
 
     if (!product) {
-      throw new NotFoundException(`Product ${id} not found`);
+      throw new NotFoundException(`Produit ${id} introuvable`);
     }
 
     return product;
   }
 
-  async update(tenantId: string, id: string, dto: Partial<CreateProductDto>) {
+  async update(tenantId: string, id: string, dto: UpdateProductDto) {
     await this.findOne(tenantId, id);
     return this.prisma.product.update({ where: { id }, data: dto });
   }
 
-  async remove(tenantId: string, id: string) {
+  async remove(tenantId: string, id: string): Promise<void> {
     await this.findOne(tenantId, id);
-    return this.prisma.product.delete({ where: { id } });
+    await this.prisma.product.update({
+      where: { id },
+      data: { isActive: false },
+    });
   }
 
   async upsertByExternalId(tenantId: string, dto: CreateProductDto) {
