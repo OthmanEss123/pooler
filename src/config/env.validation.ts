@@ -18,6 +18,7 @@ export const envValidationSchema = Joi.object({
   JWT_SECRET: Joi.string().min(32).required(),
   JWT_EXPIRES_IN: Joi.string().default('15m'),
 
+  QUEUE_ENABLED: Joi.boolean().truthy('true').falsy('false').optional(),
   REDIS_URL: Joi.string().default('redis://localhost:6379'),
   ENCRYPTION_KEY: Joi.string().length(64).optional(),
   GRPC_PORT: Joi.number().port().default(50051),

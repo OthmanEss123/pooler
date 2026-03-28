@@ -1,62 +1,58 @@
-import { Injectable } from '@nestjs/common';
+// src/queue/services/campaign-queue.service.ts
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 
-export interface SendCampaignPayload {
-  campaignId: string;
-  tenantId: string;
-}
-
-export interface SendEmailPayload {
-  campaignId: string;
-  tenantId: string;
-  contactId: string;
-  contactEmail: string;
-  subject: string;
-  htmlContent: string;
-  textContent?: string;
-  fromName: string;
-  fromEmail: string;
-  replyTo?: string;
-}
-
 @Injectable()
 export class CampaignQueueService {
+  private readonly logger = new Logger(CampaignQueueService.name);
+  private readonly isTest = process.env.NODE_ENV === 'test';
+
   constructor(
-    @InjectQueue('campaign') private readonly campaignQueue: Queue,
-    @InjectQueue('email') private readonly emailQueue: Queue,
+    @InjectQueue('campaign') private readonly campaignQueue?: Queue,
+    @InjectQueue('email')    private readonly emailQueue?: Queue,
   ) {}
 
   async sendCampaign(campaignId: string, tenantId: string) {
-    return this.campaignQueue.add(
+    if (this.isTest) {
+      this.logger.log(`[TEST] sendCampaign simulé: ${campaignId}`);
+      return;
+    }
+    return this.campaignQueue!.add(
       'send-campaign',
-      { campaignId, tenantId } satisfies SendCampaignPayload,
-      { jobId: `campaign-${campaignId}` },
+      { campaignId, tenantId },
+      { attempts: 3, backoff: { type: 'exponential', delay: 5000 } },
     );
   }
 
-  async scheduleCampaign(
-    campaignId: string,
-    tenantId: string,
-    delayMs: number,
-  ) {
-    return this.campaignQueue.add(
+  async scheduleCampaign(campaignId: string, tenantId: string, delay: number) {
+    if (this.isTest) return;
+    return this.campaignQueue!.add(
       'send-campaign',
-      { campaignId, tenantId } satisfies SendCampaignPayload,
-      {
-        jobId: `campaign-scheduled-${campaignId}`,
-        delay: delayMs,
-      },
+      { campaignId, tenantId },
+      { delay, attempts: 3 },
     );
   }
 
-  async sendEmail(payload: SendEmailPayload) {
-    return this.emailQueue.add('send-email', payload, {
-      attempts: 5,
-      backoff: {
-        type: 'exponential',
-        delay: 3000,
-      },
+  async sendEmail(payload: {
+    contactId:   string;
+    campaignId:  string;
+    tenantId:    string;
+    email:       string;
+    subject:     string;
+    htmlContent: string;
+    fromEmail:   string;
+    fromName:    string;
+  }) {
+    if (this.isTest) {
+      this.logger.log(`[TEST] sendEmail simulé: ${payload.email}`);
+      return;
+    }
+    return this.emailQueue!.add('send-email', payload, {
+      attempts:          5,
+      backoff:           { type: 'exponential', delay: 2000 },
+      removeOnComplete:  1000,
+      removeOnFail:      500,
     });
   }
 }

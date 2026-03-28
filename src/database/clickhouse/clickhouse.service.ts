@@ -101,60 +101,54 @@ export class ClickhouseService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async ensureSchema(): Promise<void> {
-    await this.getClient().exec({
-      query: `
-        CREATE TABLE IF NOT EXISTS metrics_daily
-        (
-          tenant_id String,
-          date Date,
-          revenue Float64,
-          orders UInt32,
-          email_revenue Float64,
-          ads_spend Float64,
-          sessions UInt32,
-          new_contacts UInt32
-        )
-        ENGINE = SummingMergeTree()
-        PARTITION BY toYYYYMM(date)
-        ORDER BY (tenant_id, date)
-      `,
-    });
+    await this.exec(`
+      CREATE TABLE IF NOT EXISTS metrics_daily
+      (
+        tenant_id String,
+        date Date,
+        revenue Float64,
+        orders UInt32,
+        email_revenue Float64,
+        ads_spend Float64,
+        sessions UInt32,
+        new_contacts UInt32
+      )
+      ENGINE = SummingMergeTree()
+      PARTITION BY toYYYYMM(date)
+      ORDER BY (tenant_id, date)
+    `);
 
-    await this.getClient().exec({
-      query: `
-        CREATE TABLE IF NOT EXISTS email_events_log
-        (
-          tenant_id String,
-          campaign_id String,
-          contact_id String,
-          type String,
-          occurred_at DateTime
-        )
-        ENGINE = MergeTree()
-        PARTITION BY toYYYYMM(occurred_at)
-        ORDER BY (tenant_id, campaign_id, occurred_at)
-        TTL occurred_at + INTERVAL 2 YEAR
-      `,
-    });
+    await this.exec(`
+      CREATE TABLE IF NOT EXISTS email_events_log
+      (
+        tenant_id String,
+        campaign_id String,
+        contact_id String,
+        type String,
+        occurred_at DateTime
+      )
+      ENGINE = MergeTree()
+      PARTITION BY toYYYYMM(occurred_at)
+      ORDER BY (tenant_id, campaign_id, occurred_at)
+      TTL occurred_at + INTERVAL 2 YEAR
+    `);
 
-    await this.getClient().exec({
-      query: `
-        CREATE TABLE IF NOT EXISTS ad_metrics_daily
-        (
-          tenant_id String,
-          campaign_id String,
-          date Date,
-          spend Float64,
-          impressions UInt32,
-          clicks UInt32,
-          conversions UInt32,
-          conversion_value Float64
-        )
-        ENGINE = SummingMergeTree()
-        PARTITION BY toYYYYMM(date)
-        ORDER BY (tenant_id, campaign_id, date)
-      `,
-    });
+    await this.exec(`
+      CREATE TABLE IF NOT EXISTS ad_metrics_daily
+      (
+        tenant_id String,
+        campaign_id String,
+        date Date,
+        spend Float64,
+        impressions UInt32,
+        clicks UInt32,
+        conversions UInt32,
+        conversion_value Float64
+      )
+      ENGINE = SummingMergeTree()
+      PARTITION BY toYYYYMM(date)
+      ORDER BY (tenant_id, campaign_id, date)
+    `);
   }
 
   private getClient(): ClickHouseClient {

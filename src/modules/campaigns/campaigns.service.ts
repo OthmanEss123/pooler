@@ -129,6 +129,8 @@ export class CampaignsService {
       throw new BadRequestException('Campaign must be DRAFT or SCHEDULED');
     }
 
+    this.campaignQueue.assertAvailable();
+
     await this.prisma.campaign.update({
       where: { id },
       data: {
@@ -136,7 +138,19 @@ export class CampaignsService {
       },
     });
 
-    await this.campaignQueue.sendCampaign(id, tenantId);
+    try {
+      await this.campaignQueue.sendCampaign(id, tenantId);
+    } catch (error) {
+      await this.prisma.campaign.update({
+        where: { id },
+        data: {
+          status: campaign.status,
+        },
+      });
+
+      throw error;
+    }
+
     this.logger.log(`Campaign ${id} queued for sending`);
 
     return {
@@ -156,6 +170,10 @@ export class CampaignsService {
     const scheduledDate = new Date(scheduledAt);
     const delayMs = scheduledDate.getTime() - Date.now();
 
+    if (delayMs > 0) {
+      this.campaignQueue.assertAvailable();
+    }
+
     const updated = await this.prisma.campaign.update({
       where: { id },
       data: {
@@ -169,7 +187,20 @@ export class CampaignsService {
     });
 
     if (delayMs > 0) {
-      await this.campaignQueue.scheduleCampaign(id, tenantId, delayMs);
+      try {
+        await this.campaignQueue.scheduleCampaign(id, tenantId, delayMs);
+      } catch (error) {
+        await this.prisma.campaign.update({
+          where: { id },
+          data: {
+            status: campaign.status,
+            scheduledAt: campaign.scheduledAt,
+          },
+        });
+
+        throw error;
+      }
+
       this.logger.log(
         `Campaign ${id} scheduled for ${scheduledDate.toISOString()}`,
       );
