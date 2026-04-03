@@ -4,13 +4,13 @@ import {
   Get,
   HttpCode,
   HttpStatus,
-  Ip,
   Post,
   Req,
   Res,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
@@ -24,18 +24,28 @@ import { AuthService } from './auth.service';
 import { CreateApiKeyDto } from './dto/create-api-key.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { SwitchTenantDto } from './dto/switch-tenant.dto';
 
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Public()
+  @Throttle({
+    auth: { limit: 5, ttl: 60000 },
+  })
   @Post('register')
   async register(
     @Body() dto: RegisterDto,
+    @Req() req: AuthRequest,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const result = await this.authService.register(dto);
+    const result = await this.authService.register(dto, {
+      requestId: req.requestId,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent') ?? null,
+    });
+
     this.setAuthCookies(
       res,
       result.accessToken,
@@ -51,12 +61,21 @@ export class AuthController {
 
   @Public()
   @HttpCode(HttpStatus.OK)
+  @Throttle({
+    auth: { limit: 5, ttl: 60000 },
+  })
   @Post('login')
   async login(
     @Body() dto: LoginDto,
+    @Req() req: AuthRequest,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const result = await this.authService.login(dto);
+    const result = await this.authService.login(dto, {
+      requestId: req.requestId,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent') ?? null,
+    });
+
     this.setAuthCookies(
       res,
       result.accessToken,
@@ -71,10 +90,12 @@ export class AuthController {
 
   @Public()
   @HttpCode(HttpStatus.OK)
+  @Throttle({
+    authRefresh: { limit: 10, ttl: 60000 },
+  })
   @Post('refresh')
   async refresh(
     @Req() req: AuthRequest,
-    @Ip() ip: string,
     @Res({ passthrough: true }) res: Response,
   ) {
     const refreshToken = req.cookies?.refresh_token;
@@ -89,7 +110,8 @@ export class AuthController {
       refreshToken,
       tokenFamily,
       userAgent,
-      ipAddress: ip,
+      ipAddress: req.ip,
+      requestId: req.requestId,
     });
 
     this.setAuthCookies(
@@ -112,7 +134,13 @@ export class AuthController {
     const tokenFamily = req.cookies?.token_family;
 
     if (tokenFamily) {
-      await this.authService.logout(tokenFamily);
+      await this.authService.logout(tokenFamily, {
+        requestId: req.requestId,
+        tenantId: req.user?.tenantId ?? null,
+        userId: req.user?.id ?? null,
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent') ?? null,
+      });
     }
 
     this.clearAuthCookies(res);
@@ -125,10 +153,42 @@ export class AuthController {
     return user;
   }
 
+  @Get('my-tenants')
+  getMyTenants(@CurrentUser() user: AuthenticatedUser) {
+    if (!user.id) {
+      throw new UnauthorizedException('User token required');
+    }
+    return this.authService.getMyTenants(user.id);
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Post('switch-tenant')
+  async switchTenant(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: SwitchTenantDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    if (!user.id) {
+      throw new UnauthorizedException('User token required');
+    }
+
+    const result = await this.authService.switchTenant(user.id, dto.tenantId);
+
+    this.setAuthCookies(
+      res,
+      result.tokens.accessToken,
+      result.tokens.refreshToken,
+      result.tokens.tokenFamily,
+    );
+
+    return { tenant: result.tenant };
+  }
+
   @UseGuards(RolesGuard)
   @Roles('OWNER', 'ADMIN')
   @Post('api-keys')
   async createApiKey(
+    @Req() req: AuthRequest,
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CreateApiKeyDto,
   ) {
@@ -138,8 +198,12 @@ export class AuthController {
 
     return this.authService.createApiKey({
       tenantId: user.tenantId,
+      userId: user.id,
       name: dto.name,
       scope: dto.scope,
+      requestId: req.requestId,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent') ?? null,
     });
   }
 

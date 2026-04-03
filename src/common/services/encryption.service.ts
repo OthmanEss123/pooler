@@ -1,14 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import {
-  createCipheriv,
-  createDecipheriv,
-  randomBytes,
-  scryptSync,
-} from 'crypto';
+import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
 
 const ALGORITHM = 'aes-256-cbc';
 const IV_LENGTH = 16;
+const TEST_ENCRYPTION_KEY =
+  '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
 /**
  * AES-256-CBC encryption service for storing external credentials
@@ -18,20 +15,24 @@ const IV_LENGTH = 16;
  */
 @Injectable()
 export class EncryptionService {
-  private readonly logger = new Logger(EncryptionService.name);
   private readonly key: Buffer;
 
   constructor(private readonly config: ConfigService) {
-    const rawKey = this.config.get<string>('ENCRYPTION_KEY');
+    const rawKey =
+      this.config.get<string>('ENCRYPTION_KEY') ??
+      (process.env.NODE_ENV === 'test' ? TEST_ENCRYPTION_KEY : undefined);
 
-    if (!rawKey || rawKey.length !== 64) {
-      this.logger.warn(
-        'ENCRYPTION_KEY not set or invalid (must be 64 hex chars). Encryption disabled.',
-      );
-      this.key = Buffer.alloc(32);
-    } else {
-      this.key = scryptSync(rawKey, 'pilot-salt', 32);
+    if (!rawKey) {
+      throw new Error('ENCRYPTION_KEY manquante');
     }
+
+    if (rawKey.length !== 64 || !/^[0-9a-fA-F]{64}$/.test(rawKey)) {
+      throw new Error(
+        `ENCRYPTION_KEY invalide: doit faire 64 caracteres hex, recu ${rawKey.length}`,
+      );
+    }
+
+    this.key = Buffer.from(rawKey, 'hex');
   }
 
   encrypt(plaintext: string): string {

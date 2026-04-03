@@ -6,6 +6,8 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { ClickhouseService } from '../src/database/clickhouse/clickhouse.service';
 import { PrismaService } from '../src/database/prisma/prisma.service';
+import { QueueHealthService } from '../src/queue/queue-health.service';
+import { RedisService } from '../src/redis/redis.service';
 
 interface HealthResponse {
   status: string;
@@ -13,8 +15,32 @@ interface HealthResponse {
   services: {
     prisma: string;
     clickhouse: string;
+    redis: string;
+  };
+  queues: {
+    campaign: {
+      waiting: number;
+      active: number;
+      failed: number;
+    };
+    email: {
+      waiting: number;
+      active: number;
+      failed: number;
+    };
   };
 }
+
+process.env.NODE_ENV ??= 'test';
+process.env.DATABASE_URL ??=
+  'postgresql://user:password@localhost:5432/pilot_platform';
+process.env.DIRECT_URL ??=
+  'postgresql://user:password@localhost:5432/pilot_platform';
+process.env.CLICKHOUSE_URL ??= 'http://localhost:8123/pilot';
+process.env.JWT_SECRET ??=
+  '1234567890123456789012345678901234567890123456789012345678901234';
+process.env.JWT_EXPIRES_IN ??= '15m';
+process.env.METRICS_TOKEN ??= 'test-metrics-token-1234';
 
 describe('Health (e2e)', () => {
   let app: INestApplication<Server>;
@@ -30,6 +56,17 @@ describe('Health (e2e)', () => {
       .overrideProvider(ClickhouseService)
       .useValue({
         isHealthy: jest.fn().mockResolvedValue(true),
+      })
+      .overrideProvider(RedisService)
+      .useValue({
+        isHealthy: jest.fn().mockResolvedValue(true),
+      })
+      .overrideProvider(QueueHealthService)
+      .useValue({
+        getStats: jest.fn().mockResolvedValue({
+          campaign: { waiting: 0, active: 0, failed: 0 },
+          email: { waiting: 0, active: 0, failed: 0 },
+        }),
       })
       .compile();
 
@@ -50,7 +87,7 @@ describe('Health (e2e)', () => {
     await app.close();
   });
 
-  it('GET /api/v1/health -> 200', async () => {
+  it('GET /api/v1/health -> 200 with request id header', async () => {
     const response = await request(app.getHttpServer())
       .get('/api/v1/health')
       .expect(200)
@@ -58,10 +95,14 @@ describe('Health (e2e)', () => {
 
     const body = response.body as HealthResponse;
 
+    expect(response.headers['x-request-id']).toEqual(expect.any(String));
     expect(body).toHaveProperty('status', 'ok');
     expect(body).toHaveProperty('timestamp');
     expect(body.services).toHaveProperty('prisma', 'connected');
     expect(body.services).toHaveProperty('clickhouse', 'connected');
+    expect(body.services).toHaveProperty('redis', 'connected');
+    expect(body.queues.campaign.waiting).toBe(0);
+    expect(body.queues.email.waiting).toBe(0);
   });
 
   it('GET /api/v1/unknown -> 404', async () => {

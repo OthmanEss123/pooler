@@ -15,19 +15,33 @@ import { CurrentTenant } from '../../common/decorators/current-tenant.decorator'
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { ContactsService } from './contacts.service';
+import { SuppressionsService } from './suppressions.service';
 import { BulkUpsertContactsDto } from './dto/bulk-upsert-contacts.dto';
 import { CreateContactDto } from './dto/create-contact.dto';
 import { QueryContactsDto } from './dto/query-contacts.dto';
+import { RecentBuyersQueryDto } from './dto/recent-buyers-query.dto';
 import { UpdateContactDto } from './dto/update-contact.dto';
 
 @UseGuards(RolesGuard)
 @Controller('contacts')
 export class ContactsController {
-  constructor(private readonly contactsService: ContactsService) {}
+  constructor(
+    private readonly contactsService: ContactsService,
+    private readonly suppressionsService: SuppressionsService,
+  ) {}
 
   @Get()
   findAll(@CurrentTenant() tenantId: string, @Query() query: QueryContactsDto) {
     return this.contactsService.findAll(tenantId, query);
+  }
+
+  @Get('recent-buyers')
+  @Roles('OWNER', 'ADMIN')
+  getRecentBuyers(
+    @CurrentTenant() tenantId: string,
+    @Query() query: RecentBuyersQueryDto,
+  ) {
+    return this.suppressionsService.getRecentBuyers(tenantId, query.days);
   }
 
   @Get(':id')
@@ -49,6 +63,18 @@ export class ContactsController {
     @Body() dto: BulkUpsertContactsDto,
   ) {
     return this.contactsService.bulkUpsert(tenantId, dto);
+  }
+
+  @Post('sync-suppression')
+  @Roles('OWNER', 'ADMIN')
+  @HttpCode(HttpStatus.OK)
+  async syncSuppression(@CurrentTenant() tenantId: string) {
+    const [segment, audience] = await Promise.all([
+      this.suppressionsService.syncRecentBuyersSegment(tenantId, 30),
+      this.suppressionsService.syncSuppressionsToAds(tenantId),
+    ]);
+
+    return { segment, audience };
   }
 
   @Patch(':id')

@@ -1,0 +1,78 @@
+﻿syntax = "proto3";
+
+package contacts;
+
+service ContactsService {
+  rpc GetContact(GetContactRequest) returns (ContactResponse);
+  rpc ListContacts(ListContactsRequest) returns (ListContactsResponse);
+  rpc GetSegmentContacts(GetSegmentRequest) returns (ListContactsResponse);
+  rpc UpdateHealthScore(UpdateHealthScoreRequest) returns (HealthScoreResponse);
+  rpc BulkUpsertContacts(BulkUpsertRequest) returns (BulkUpsertResponse);
+}
+
+message Contact {
+  string id = 1;
+  string tenantId = 2;
+  string email = 3;
+  string firstName = 4;
+  string lastName = 5;
+  string phone = 6;
+  double healthScore = 7;
+  string createdAt = 8;
+  string updatedAt = 9;
+}
+
+message GetContactRequest {
+  string id = 1;
+  string tenantId = 2;
+}
+
+message ContactResponse {
+  Contact contact = 1;
+}
+
+message ListContactsRequest {
+  string tenantId = 1;
+  string filterJson = 2;
+  int32 page = 3;
+  int32 limit = 4;
+}
+
+message ListContactsResponse {
+  repeated Contact contacts = 1;
+  int32 total = 2;
+}
+
+message GetSegmentRequest {
+  string tenantId = 1;
+  string segmentId = 2;
+}
+
+message UpdateHealthScoreRequest {
+  string tenantId = 1;
+  string contactId = 2;
+  double score = 3;
+}
+
+message HealthScoreResponse {
+  string contactId = 1;
+  double score = 2;
+  string status = 3;
+}
+
+message ContactInput {
+  string tenantId = 1;
+  string email = 2;
+  string firstName = 3;
+  string lastName = 4;
+  string phone = 5;
+}
+
+message BulkUpsertRequest {
+  repeated ContactInput contacts = 1;
+}
+
+message BulkUpsertResponse {
+  int32 count = 1;
+  string status = 2;
+}

@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { FlowExecutionStatus, Prisma, StepStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma/prisma.service';
 import { FlowQueueService } from '../../queue/services/flow-queue.service';
+import { EmailProviderService } from '../email-provider/email-provider.service';
 import { FlowNodeType } from './dto/create-flow.dto';
 
 const toInputJsonValue = (value: unknown): Prisma.InputJsonValue =>
@@ -22,6 +23,7 @@ export class FlowExecutor {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly emailProvider: EmailProviderService,
     private readonly flowQueueService: FlowQueueService,
   ) {}
 
@@ -139,6 +141,9 @@ export class FlowExecutor {
     contact: Record<string, unknown>,
     execution: {
       id: string;
+      flowId: string;
+      contactId: string;
+      tenantId: string;
       flow: { nodes: unknown };
     },
   ): Promise<ExecutionResult> {
@@ -169,11 +174,17 @@ export class FlowExecutor {
     return nodes.findIndex((node) => node.id === nodeId);
   }
 
-  private handleSendEmail(
+  private async handleSendEmail(
     node: Record<string, unknown>,
     contact: Record<string, unknown>,
-    execution: { flow: { nodes: unknown } },
-  ): ExecutionResult {
+    execution: {
+      id: string;
+      flowId: string;
+      contactId: string;
+      tenantId: string;
+      flow: { nodes: unknown };
+    },
+  ): Promise<ExecutionResult> {
     const nodes = execution.flow.nodes as Array<Record<string, unknown>>;
     const config =
       typeof node.config === 'object' && node.config !== null
@@ -182,11 +193,69 @@ export class FlowExecutor {
 
     const subject =
       typeof config.subject === 'string' ? config.subject : 'Email';
-    const body = typeof config.body === 'string' ? config.body : 'Bonjour';
+    const htmlContent =
+      typeof config.htmlContent === 'string'
+        ? config.htmlContent
+        : typeof config.body === 'string'
+          ? config.body
+          : '<p>Bonjour</p>';
+    const textContent =
+      typeof config.textContent === 'string' ? config.textContent : undefined;
+    const fromEmail =
+      typeof config.fromEmail === 'string' && config.fromEmail.length > 0
+        ? config.fromEmail
+        : (process.env.SES_FROM_DEFAULT ?? 'noreply@pilot.local');
+    const fromName =
+      typeof config.fromName === 'string' && config.fromName.length > 0
+        ? config.fromName
+        : 'Pilot';
+    const replyTo =
+      typeof config.replyTo === 'string' && config.replyTo.length > 0
+        ? config.replyTo
+        : undefined;
     const contactEmail =
-      typeof contact.email === 'string' ? contact.email : 'unknown@example.com';
+      typeof contact.email === 'string' && contact.email.length > 0
+        ? contact.email
+        : null;
 
-    this.logger.log(`Send email to ${contactEmail} | subject=${subject}`);
+    if (!contactEmail) {
+      throw new Error('Email contact introuvable pour send_email');
+    }
+
+    const alreadySent = await this.prisma.flowExecutionStep.findFirst({
+      where: {
+        executionId: execution.id,
+        stepId: String(node.id),
+        status: StepStatus.COMPLETED,
+      },
+    });
+
+    let messageId: string | undefined;
+    let provider: string | undefined;
+
+    if (!alreadySent) {
+      this.logger.log(`Send email to ${contactEmail} | subject=${subject}`);
+
+      const result = await this.emailProvider.sendEmail({
+        to: contactEmail,
+        subject,
+        htmlBody: htmlContent,
+        textBody: textContent,
+        fromName,
+        fromEmail,
+        replyTo,
+        tags: {
+          tenantId: execution.tenantId,
+          contactId: execution.contactId,
+          flowId: execution.flowId,
+          executionId: execution.id,
+          stepId: String(node.id),
+        },
+      });
+
+      messageId = result.messageId;
+      provider = result.provider;
+    }
 
     const nextStepIndex = this.getNextIndexByNodeId(
       nodes,
@@ -200,10 +269,12 @@ export class FlowExecutor {
     return {
       nextStepIndex,
       result: {
-        sent: true,
+        sent: !alreadySent,
+        idempotent: Boolean(alreadySent),
         to: contactEmail,
         subject,
-        body,
+        provider,
+        messageId,
       },
     };
   }

@@ -1,24 +1,67 @@
 // src/queue/services/campaign-queue.service.ts
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Optional,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
+import { ConfigService } from '@nestjs/config';
 import { Queue } from 'bullmq';
+
+export interface SendCampaignPayload {
+  campaignId: string;
+  tenantId: string;
+}
+
+export interface SendEmailPayload {
+  contactId: string;
+  campaignId: string;
+  tenantId: string;
+  contactEmail: string;
+  subject: string;
+  htmlContent: string;
+  textContent?: string;
+  fromEmail: string;
+  fromName: string;
+  replyTo?: string;
+}
 
 @Injectable()
 export class CampaignQueueService {
   private readonly logger = new Logger(CampaignQueueService.name);
-  private readonly isTest = process.env.NODE_ENV === 'test';
+  private readonly queueEnabled: boolean;
 
   constructor(
-    @InjectQueue('campaign') private readonly campaignQueue?: Queue,
-    @InjectQueue('email')    private readonly emailQueue?: Queue,
-  ) {}
+    private readonly config: ConfigService,
+    @Optional() @InjectQueue('campaign') private readonly campaignQueue?: Queue,
+    @Optional() @InjectQueue('email') private readonly emailQueue?: Queue,
+  ) {
+    this.queueEnabled = this.config.get<boolean>('QUEUE_ENABLED', true);
+  }
+
+  assertAvailable() {
+    if (!this.queueEnabled) {
+      throw new ServiceUnavailableException(
+        'Queue desactivee (QUEUE_ENABLED=false)',
+      );
+    }
+
+    if (!this.campaignQueue || !this.emailQueue) {
+      throw new ServiceUnavailableException(
+        'Campaign queue infrastructure is not available',
+      );
+    }
+  }
 
   async sendCampaign(campaignId: string, tenantId: string) {
-    if (this.isTest) {
-      this.logger.log(`[TEST] sendCampaign simulé: ${campaignId}`);
-      return;
+    if (!this.queueEnabled || !this.campaignQueue) {
+      throw new ServiceUnavailableException(
+        'Queue desactivee — envoi impossible',
+      );
     }
-    return this.campaignQueue!.add(
+
+    return this.campaignQueue.add(
       'send-campaign',
       { campaignId, tenantId },
       { attempts: 3, backoff: { type: 'exponential', delay: 5000 } },
@@ -26,33 +69,32 @@ export class CampaignQueueService {
   }
 
   async scheduleCampaign(campaignId: string, tenantId: string, delay: number) {
-    if (this.isTest) return;
-    return this.campaignQueue!.add(
+    if (!this.queueEnabled || !this.campaignQueue) {
+      throw new ServiceUnavailableException(
+        'Queue desactivee — planification impossible',
+      );
+    }
+
+    return this.campaignQueue.add(
       'send-campaign',
       { campaignId, tenantId },
       { delay, attempts: 3 },
     );
   }
 
-  async sendEmail(payload: {
-    contactId:   string;
-    campaignId:  string;
-    tenantId:    string;
-    email:       string;
-    subject:     string;
-    htmlContent: string;
-    fromEmail:   string;
-    fromName:    string;
-  }) {
-    if (this.isTest) {
-      this.logger.log(`[TEST] sendEmail simulé: ${payload.email}`);
+  async sendEmail(payload: SendEmailPayload) {
+    if (!this.queueEnabled || !this.emailQueue) {
+      this.logger.log(
+        `[QUEUE_DISABLED] sendEmail ignored: ${payload.contactEmail}`,
+      );
       return;
     }
-    return this.emailQueue!.add('send-email', payload, {
-      attempts:          5,
-      backoff:           { type: 'exponential', delay: 2000 },
-      removeOnComplete:  1000,
-      removeOnFail:      500,
+
+    return this.emailQueue.add('send-email', payload, {
+      attempts: 5,
+      backoff: { type: 'exponential', delay: 2000 },
+      removeOnComplete: 1000,
+      removeOnFail: 500,
     });
   }
 }

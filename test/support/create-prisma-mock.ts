@@ -41,6 +41,7 @@ export interface MockMembership {
 }
 
 export interface MockRefreshToken {
+  [key: string]: unknown;
   id: string;
   tenantId: string;
   userId: string;
@@ -102,6 +103,24 @@ export interface MockSegment {
 
 export interface MockSegmentMember {
   segmentId: string;
+  contactId: string;
+  addedAt: Date;
+}
+
+export interface MockAdAudience {
+  id: string;
+  tenantId: string;
+  adCampaignId: string | null;
+  segmentId: string | null;
+  externalId: string | null;
+  name: string;
+  memberCount: number;
+  lastSyncAt: Date | null;
+  createdAt: Date;
+}
+
+export interface MockAdAudienceMember {
+  audienceId: string;
   contactId: string;
   addedAt: Date;
 }
@@ -296,6 +315,8 @@ export const createPrismaMock = () => {
   const contacts: MockContact[] = [];
   const segments: MockSegment[] = [];
   const segmentMembers: MockSegmentMember[] = [];
+  const adAudiences: MockAdAudience[] = [];
+  const adAudienceMembers: MockAdAudienceMember[] = [];
 
   let tenantCounter = 1;
   let userCounter = 1;
@@ -304,6 +325,7 @@ export const createPrismaMock = () => {
   let apiKeyCounter = 1;
   let contactCounter = 1;
   let segmentCounter = 1;
+  let adAudienceCounter = 1;
 
   const seedContactsForTenant = (tenantId: string) => {
     const now = new Date();
@@ -688,6 +710,46 @@ export const createPrismaMock = () => {
           return refreshToken;
         },
       ),
+      findFirst: jest.fn(
+        async ({
+          where,
+          orderBy,
+          select,
+        }: {
+          where?: { tokenFamily?: string };
+          orderBy?: { createdAt: 'asc' | 'desc' };
+          select?: SelectMap;
+        }) => {
+          const filtered = refreshTokens.filter((candidate) => {
+            if (
+              where?.tokenFamily &&
+              candidate.tokenFamily !== where.tokenFamily
+            ) {
+              return false;
+            }
+
+            return true;
+          });
+
+          filtered.sort((left, right) =>
+            orderBy?.createdAt === 'asc'
+              ? left.createdAt.getTime() - right.createdAt.getTime()
+              : right.createdAt.getTime() - left.createdAt.getTime(),
+          );
+
+          const refreshToken = filtered[0] ?? null;
+
+          if (!refreshToken) {
+            return null;
+          }
+
+          if (!select) {
+            return refreshToken;
+          }
+
+          return pickSelected(refreshToken as Record<string, unknown>, select);
+        },
+      ),
       create: jest.fn(
         async ({
           data,
@@ -754,6 +816,25 @@ export const createPrismaMock = () => {
               Object.assign(refreshToken, data);
               count += 1;
             }
+          }
+
+          return { count };
+        },
+      ),
+      deleteMany: jest.fn(
+        async ({ where }: { where?: { expiresAt?: { lt?: Date } } }) => {
+          let count = 0;
+
+          for (let index = refreshTokens.length - 1; index >= 0; index -= 1) {
+            if (
+              where?.expiresAt?.lt &&
+              !(refreshTokens[index].expiresAt < where.expiresAt.lt)
+            ) {
+              continue;
+            }
+
+            refreshTokens.splice(index, 1);
+            count += 1;
           }
 
           return { count };
@@ -882,6 +963,28 @@ export const createPrismaMock = () => {
 
             return true;
           }).length;
+        },
+      ),
+      deleteMany: jest.fn(
+        async ({ where }: { where?: { expiresAt?: { lt?: Date } } }) => {
+          let count = 0;
+
+          for (let index = apiKeys.length - 1; index >= 0; index -= 1) {
+            if (
+              where?.expiresAt?.lt &&
+              !(
+                apiKeys[index].expiresAt !== null &&
+                apiKeys[index].expiresAt! < where.expiresAt.lt
+              )
+            ) {
+              continue;
+            }
+
+            apiKeys.splice(index, 1);
+            count += 1;
+          }
+
+          return { count };
         },
       ),
     },
@@ -1175,6 +1278,142 @@ export const createPrismaMock = () => {
           return true;
         }).length;
       }),
+    },
+    adAudience: {
+      upsert: jest.fn(
+        async ({
+          where,
+          update,
+          create,
+        }: {
+          where: { tenantId_name: { tenantId: string; name: string } };
+          update: { memberCount?: number; lastSyncAt?: Date | null };
+          create: {
+            tenantId: string;
+            adCampaignId?: string | null;
+            segmentId?: string | null;
+            externalId?: string | null;
+            name: string;
+            memberCount?: number;
+            lastSyncAt?: Date | null;
+          };
+        }) => {
+          const existing = adAudiences.find(
+            (candidate) =>
+              candidate.tenantId === where.tenantId_name.tenantId &&
+              candidate.name === where.tenantId_name.name,
+          );
+
+          if (existing) {
+            if (update.memberCount !== undefined) {
+              existing.memberCount = update.memberCount;
+            }
+
+            if (update.lastSyncAt !== undefined) {
+              existing.lastSyncAt = update.lastSyncAt;
+            }
+
+            return existing;
+          }
+
+          const audience: MockAdAudience = {
+            id: `audience-${adAudienceCounter++}`,
+            tenantId: create.tenantId,
+            adCampaignId: create.adCampaignId ?? null,
+            segmentId: create.segmentId ?? null,
+            externalId: create.externalId ?? null,
+            name: create.name,
+            memberCount: create.memberCount ?? 0,
+            lastSyncAt: create.lastSyncAt ?? null,
+            createdAt: new Date(),
+          };
+
+          adAudiences.push(audience);
+          return audience;
+        },
+      ),
+      update: jest.fn(
+        async ({
+          where,
+          data,
+        }: {
+          where: { id: string };
+          data: { memberCount?: number; lastSyncAt?: Date | null };
+        }) => {
+          const audience = adAudiences.find(
+            (candidate) => candidate.id === where.id,
+          );
+
+          if (!audience) {
+            throw new Error('Ad audience not found');
+          }
+
+          if (data.memberCount !== undefined) {
+            audience.memberCount = data.memberCount;
+          }
+
+          if (data.lastSyncAt !== undefined) {
+            audience.lastSyncAt = data.lastSyncAt;
+          }
+
+          return audience;
+        },
+      ),
+    },
+    adAudienceMember: {
+      deleteMany: jest.fn(
+        async ({ where }: { where?: { audienceId?: string } }) => {
+          let count = 0;
+
+          for (
+            let index = adAudienceMembers.length - 1;
+            index >= 0;
+            index -= 1
+          ) {
+            if (
+              where?.audienceId === undefined ||
+              adAudienceMembers[index].audienceId === where.audienceId
+            ) {
+              adAudienceMembers.splice(index, 1);
+              count += 1;
+            }
+          }
+
+          return { count };
+        },
+      ),
+      createMany: jest.fn(
+        async ({
+          data,
+          skipDuplicates,
+        }: {
+          data: Array<{ audienceId: string; contactId: string }>;
+          skipDuplicates?: boolean;
+        }) => {
+          let count = 0;
+
+          for (const item of data) {
+            const exists = adAudienceMembers.some(
+              (candidate) =>
+                candidate.audienceId === item.audienceId &&
+                candidate.contactId === item.contactId,
+            );
+
+            if (exists && skipDuplicates) {
+              continue;
+            }
+
+            adAudienceMembers.push({
+              audienceId: item.audienceId,
+              contactId: item.contactId,
+              addedAt: new Date(),
+            });
+            count += 1;
+          }
+
+          return { count };
+        },
+      ),
     },
     $transaction: async <T>(
       input: Promise<unknown>[] | ((tx: typeof prismaMock) => Promise<T>),

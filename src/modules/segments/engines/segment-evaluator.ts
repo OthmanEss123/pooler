@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { EmailStatus, Prisma } from '@prisma/client';
+import { EmailStatus, Prisma, RfmSegment } from '@prisma/client';
 import {
   SegmentConditionGroup,
   SegmentRule,
@@ -268,8 +268,9 @@ export class SegmentEvaluator {
     if (rule.operator === 'eq') {
       return {
         healthScore: {
-          path: ['segment'],
-          equals: rule.value as string,
+          is: {
+            segment: rule.value as RfmSegment,
+          },
         },
       };
     }
@@ -278,23 +279,27 @@ export class SegmentEvaluator {
       return {
         NOT: {
           healthScore: {
-            path: ['segment'],
-            equals: rule.value as string,
+            is: {
+              segment: rule.value as RfmSegment,
+            },
           },
         },
       };
     }
 
     if (rule.operator === 'in') {
-      const values = rule.value as string[];
+      const values = rule.value as RfmSegment[];
 
       return {
-        OR: values.map((value) => ({
-          healthScore: {
-            path: ['segment'],
-            equals: value,
-          },
-        })),
+        OR: values.map(
+          (value): Prisma.ContactWhereInput => ({
+            healthScore: {
+              is: {
+                segment: value,
+              },
+            },
+          }),
+        ),
       };
     }
 

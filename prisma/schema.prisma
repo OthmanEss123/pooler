@@ -64,6 +64,33 @@ enum OrderStatus {
   REFUNDED
 }
 
+enum IntegrationType {
+  SHOPIFY
+  WOOCOMMERCE
+  GOOGLE_ANALYTICS
+  GOOGLE_ADS
+}
+
+enum IntegrationStatus {
+  ACTIVE
+  DISCONNECTED
+  ERROR
+}
+
+enum AdCampaignType {
+  SEARCH
+  SHOPPING
+  PERFORMANCE_MAX
+  DISPLAY
+  VIDEO
+}
+
+enum AdCampaignStatus {
+  ENABLED
+  PAUSED
+  REMOVED
+}
+
 model Tenant {
   id        String   @id @default(cuid())
   name      String
@@ -80,6 +107,9 @@ model Tenant {
   healthScores   CustomerHealthScore[]
   flows          Flow[]
   flowExecutions FlowExecution[]
+  integrations   Integration[]
+  adCampaigns    AdCampaign[]
+  adAudiences    AdAudience[]
 
   @@map("tenants")
 }
@@ -192,10 +222,11 @@ model Contact {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  orders         Order[]
-  segmentMembers SegmentMember[]
-  emailEvents    EmailEvent[]
-  executions     FlowExecution[]
+  orders           Order[]
+  segmentMembers   SegmentMember[]
+  emailEvents      EmailEvent[]
+  executions       FlowExecution[]
+  adAudienceMembers AdAudienceMember[]
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -257,8 +288,9 @@ model Segment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  members   SegmentMember[]
-  campaigns Campaign[]
+  members     SegmentMember[]
+  campaigns   Campaign[]
+  adAudiences AdAudience[]
 
   @@unique([tenantId, name])
   @@index([tenantId])
@@ -513,3 +545,100 @@ model FlowExecutionStep {
   @@index([executionId])
   @@index([stepId])
 }
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  metadata  Json
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+  @@index([entity, entityId])
+}
+model Integration {
+  id          String            @id @default(cuid())
+  tenantId    String
+  type        IntegrationType
+  status      IntegrationStatus @default(DISCONNECTED)
+  credentials String?
+  metadata    Json?
+  lastSyncAt  DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, type])
+  @@index([tenantId])
+  @@index([status])
+  @@map("integrations")
+}
+
+model AdCampaign {
+  id               String            @id @default(cuid())
+  tenantId         String
+  externalId       String
+  name             String
+  type             AdCampaignType
+  status           AdCampaignStatus
+  budgetDaily      Decimal?          @db.Decimal(18, 2)
+  spend            Decimal           @default(0) @db.Decimal(18, 2)
+  impressions      Int               @default(0)
+  clicks           Int               @default(0)
+  conversions      Decimal           @default(0) @db.Decimal(18, 2)
+  conversionValue  Decimal           @default(0) @db.Decimal(18, 2)
+  roas             Decimal           @default(0) @db.Decimal(18, 4)
+  syncedAt         DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  audiences        AdAudience[]
+
+  @@unique([tenantId, externalId])
+  @@index([tenantId])
+  @@index([status])
+}
+
+model AdAudience {
+  id            String              @id @default(cuid())
+  tenantId      String
+  adCampaignId  String?
+  segmentId     String?
+  externalId    String?
+  name          String
+  memberCount   Int                 @default(0)
+  lastSyncAt    DateTime?
+  createdAt     DateTime            @default(now())
+
+  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  adCampaign    AdCampaign?         @relation(fields: [adCampaignId], references: [id], onDelete: SetNull)
+  segment       Segment?            @relation(fields: [segmentId], references: [id], onDelete: SetNull)
+  members       AdAudienceMember[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@index([adCampaignId])
+  @@index([segmentId])
+}
+
+model AdAudienceMember {
+  audienceId    String
+  contactId     String
+  addedAt       DateTime            @default(now())
+
+  audience      AdAudience          @relation(fields: [audienceId], references: [id], onDelete: Cascade)
+  contact       Contact             @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@id([audienceId, contactId])
+  @@index([contactId])
+}
+

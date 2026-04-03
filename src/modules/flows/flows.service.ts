@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { FlowExecutionStatus, FlowStatus, Prisma } from '@prisma/client';
@@ -18,6 +19,8 @@ const toInputJsonValue = (value: unknown): Prisma.InputJsonValue =>
 
 @Injectable()
 export class FlowsService {
+  private readonly logger = new Logger(FlowsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly flowQueueService: FlowQueueService,
@@ -55,9 +58,88 @@ export class FlowsService {
     }
   }
 
+  private validateFlowGraph(nodes: unknown) {
+    if (!Array.isArray(nodes) || nodes.length === 0) {
+      throw new BadRequestException('Un flow doit avoir au moins un noeud');
+    }
+
+    const nodeMap = new Map<string, Record<string, unknown>>();
+
+    for (const node of nodes) {
+      if (typeof node !== 'object' || node === null) {
+        throw new BadRequestException(
+          'Chaque noeud du flow doit etre un objet',
+        );
+      }
+
+      const record = node as Record<string, unknown>;
+      const nodeId = record.id;
+
+      if (typeof nodeId !== 'string' || nodeId.length === 0) {
+        throw new BadRequestException('Chaque noeud doit avoir un id valide');
+      }
+
+      if (nodeMap.has(nodeId)) {
+        throw new BadRequestException(`Noeud duplique detecte: ${nodeId}`);
+      }
+
+      nodeMap.set(nodeId, record);
+    }
+
+    const hasExit = [...nodeMap.values()].some(
+      (node) => node.type === FlowNodeType.EXIT,
+    );
+
+    if (!hasExit) {
+      throw new BadRequestException(
+        'Un flow doit avoir au moins un noeud de type exit',
+      );
+    }
+
+    const visited = new Set<string>();
+
+    const dfs = (nodeId: string, path: Set<string>) => {
+      if (!nodeId) {
+        return;
+      }
+
+      if (path.has(nodeId)) {
+        throw new BadRequestException(
+          `Boucle infinie detectee au noeud: ${nodeId}`,
+        );
+      }
+
+      if (visited.has(nodeId)) {
+        return;
+      }
+
+      const node = nodeMap.get(nodeId);
+
+      if (!node) {
+        throw new BadRequestException(`Noeud cible introuvable: ${nodeId}`);
+      }
+
+      path.add(nodeId);
+      visited.add(nodeId);
+
+      const nexts = [node.nextId, node.trueNextId, node.falseNextId].filter(
+        (next): next is string => typeof next === 'string' && next.length > 0,
+      );
+
+      for (const next of nexts) {
+        dfs(next, new Set(path));
+      }
+    };
+
+    for (const nodeId of nodeMap.keys()) {
+      dfs(nodeId, new Set());
+    }
+  }
+
   async create(tenantId: string, dto: CreateFlowDto) {
     this.validateTrigger(dto.trigger);
     this.validateNodes(dto.nodes);
+    this.validateFlowGraph(dto.nodes);
 
     return this.prisma.flow.create({
       data: {
@@ -125,6 +207,7 @@ export class FlowsService {
 
     if (dto.nodes !== undefined) {
       this.validateNodes(dto.nodes);
+      this.validateFlowGraph(dto.nodes);
     }
 
     return this.prisma.flow.update({
@@ -148,6 +231,7 @@ export class FlowsService {
     const flow = await this.findOne(tenantId, id);
     this.validateTrigger(flow.trigger);
     this.validateNodes(flow.nodes);
+    this.validateFlowGraph(flow.nodes);
 
     return this.prisma.flow.update({
       where: { id },
@@ -237,6 +321,53 @@ export class FlowsService {
       },
       orderBy: { startedAt: 'desc' },
     });
+  }
+
+  async triggerFlowsSafe(
+    tenantId: string,
+    triggerType: FlowTriggerType | string,
+    contactId: string,
+  ): Promise<void> {
+    try {
+      if (typeof this.prisma.flow?.findMany !== 'function') {
+        return;
+      }
+
+      const flows = await this.prisma.flow.findMany({
+        where: {
+          tenantId,
+          status: FlowStatus.ACTIVE,
+        },
+      });
+
+      const matching = flows.filter((flow) => {
+        const trigger = flow.trigger as Record<string, unknown> | null;
+        return trigger?.type === triggerType;
+      });
+
+      const results = await Promise.allSettled(
+        matching.map((flow) => this.triggerFlow(tenantId, flow.id, contactId)),
+      );
+
+      results.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          const reason =
+            result.reason instanceof Error
+              ? (result.reason.stack ?? result.reason.message)
+              : JSON.stringify(result.reason);
+
+          this.logger.error(
+            `Flow ${matching[index].id} trigger ${triggerType} echoue`,
+            reason,
+          );
+        }
+      });
+    } catch (error) {
+      this.logger.error(
+        `triggerFlowsSafe ${triggerType} - erreur globale`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
   }
 
   async findActiveFlowsByTrigger(tenantId: string, type: FlowTriggerType) {

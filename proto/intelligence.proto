@@ -1,0 +1,59 @@
+﻿syntax = "proto3";
+
+package intelligence;
+
+service IntelligenceService {
+  rpc GetAnalyticsSummary(AnalyticsRequest) returns (AnalyticsSummaryResponse);
+  rpc PushInsight(PushInsightRequest) returns (PushInsightResponse);
+  rpc GetRevenueForecast(ForecastRequest) returns (ForecastResponse);
+  rpc AskCopilot(CopilotRequest) returns (CopilotResponse);
+}
+
+message AnalyticsRequest {
+  string tenantId = 1;
+  int32 days = 2;
+}
+
+message AnalyticsSummaryResponse {
+  double revenue = 1;
+  int32 orders = 2;
+  int32 customers = 3;
+  double averageOrderValue = 4;
+  string summary = 5;
+}
+
+message PushInsightRequest {
+  string tenantId = 1;
+  string type = 2;
+  string title = 3;
+  string description = 4;
+  string severity = 5;
+}
+
+message PushInsightResponse {
+  string id = 1;
+  string status = 2;
+}
+
+message ForecastRequest {
+  string tenantId = 1;
+  int32 days = 2;
+}
+
+message ForecastResponse {
+  double predictedRevenue = 1;
+  repeated double dailyForecast = 2;
+  string model = 3;
+}
+
+message CopilotRequest {
+  string tenantId = 1;
+  string question = 2;
+  string context = 3;
+}
+
+message CopilotResponse {
+  string answer = 1;
+  string reasoning = 2;
+  repeated string actions = 3;
+}

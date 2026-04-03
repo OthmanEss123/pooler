@@ -1,10 +1,15 @@
+import '../config/load-env';
 import { BullModule } from '@nestjs/bullmq';
 import { forwardRef, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { PrismaModule } from '../database/prisma/prisma.module';
 import { AnalyticsModule } from '../modules/analytics/analytics.module';
+import { EmailEventsModule } from '../modules/email-events/email-events.module';
 import { EmailProviderModule } from '../modules/email-provider/email-provider.module';
 import { FlowsModule } from '../modules/flows/flows.module';
+import { GoogleAdsModule } from '../modules/integrations/google-ads/google-ads.module';
+import { QueueEventsService } from './queue-events.service';
+import { QueueHealthService } from './queue-health.service';
 import { CampaignProcessor } from './processors/campaign.processor';
 import { EmailProcessor } from './processors/email.processor';
 import { FlowProcessor } from './processors/flow.processor';
@@ -13,14 +18,15 @@ import { CampaignQueueService } from './services/campaign-queue.service';
 import { FlowQueueService } from './services/flow-queue.service';
 import { SyncQueueService } from './services/sync-queue.service';
 
-const isTest = process.env.NODE_ENV === 'test';
+const queueEnabled = process.env.QUEUE_ENABLED !== 'false';
 
 @Module({
   imports: [
     AnalyticsModule,
     PrismaModule,
     forwardRef(() => FlowsModule),
-    ...(!isTest
+    forwardRef(() => GoogleAdsModule),
+    ...(queueEnabled
       ? [
           BullModule.forRootAsync({
             imports: [ConfigModule],
@@ -36,17 +42,25 @@ const isTest = process.env.NODE_ENV === 'test';
             { name: 'flow' },
           ),
           EmailProviderModule,
+          EmailEventsModule,
         ]
       : []),
   ],
   providers: [
-    ...(!isTest
+    ...(queueEnabled
       ? [CampaignProcessor, EmailProcessor, SyncProcessor, FlowProcessor]
       : []),
     CampaignQueueService,
     SyncQueueService,
     FlowQueueService,
+    QueueHealthService,
+    QueueEventsService,
   ],
-  exports: [CampaignQueueService, SyncQueueService, FlowQueueService],
+  exports: [
+    CampaignQueueService,
+    SyncQueueService,
+    FlowQueueService,
+    QueueHealthService,
+  ],
 })
 export class QueueModule {}

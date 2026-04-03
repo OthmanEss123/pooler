@@ -1,0 +1,34 @@
+﻿syntax = "proto3";
+
+package campaigns;
+
+service CampaignsService {
+  rpc GetCampaignStats(CampaignStatsRequest) returns (CampaignStatsResponse);
+  rpc UpdateCampaignMetrics(UpdateMetricsRequest) returns (UpdateMetricsResponse);
+}
+
+message CampaignStatsRequest {
+  string tenantId = 1;
+  string campaignId = 2;
+}
+
+message CampaignStatsResponse {
+  string campaignId = 1;
+  int32 sent = 2;
+  int32 opened = 3;
+  int32 clicked = 4;
+  double revenue = 5;
+}
+
+message UpdateMetricsRequest {
+  string tenantId = 1;
+  string campaignId = 2;
+  int32 sent = 3;
+  int32 opened = 4;
+  int32 clicked = 5;
+  double revenue = 6;
+}
+
+message UpdateMetricsResponse {
+  string status = 1;
+}

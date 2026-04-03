@@ -9,6 +9,7 @@ import {
   Param,
   Post,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { CurrentTenant } from '../../common/decorators/current-tenant.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { TrackEmailEventDto } from './dto/track-email-event.dto';
@@ -48,35 +49,30 @@ export class EmailEventsController {
     return this.emailEventsService.getEventsByCampaign(tenantId, campaignId);
   }
 
-  /** Direct webhook — accepts TrackEmailEventDto (used in tests / manual tracking) */
   @Public()
+  @Throttle({ webhook: { limit: 200, ttl: 60000 } })
   @Post('webhook')
   @HttpCode(HttpStatus.OK)
   webhook(@Body() dto: TrackEmailEventDto) {
     return this.emailEventsService.trackEvent(dto);
   }
 
-  /**
-   * SNS → SES webhook
-   * Handles SubscriptionConfirmation and Notification message types.
-   */
   @Public()
+  @Throttle({ webhook: { limit: 200, ttl: 60000 } })
   @Post('ses-webhook')
   @HttpCode(HttpStatus.OK)
   async sesWebhook(
     @Headers('x-amz-sns-message-type') messageType: string | undefined,
     @Body() body: SnsMessage | Record<string, unknown>,
   ) {
-    // Handle SNS subscription confirmation
     if (messageType === 'SubscriptionConfirmation') {
       const snsBody = body as SnsMessage;
       this.logger.log(
-        `SNS SubscriptionConfirmation — confirm URL: ${snsBody.SubscribeURL ?? 'N/A'}`,
+        `SNS SubscriptionConfirmation - confirm URL: ${snsBody.SubscribeURL ?? 'N/A'}`,
       );
       return { ok: true, message: 'SubscriptionConfirmation received' };
     }
 
-    // Handle SNS notification
     if (messageType === 'Notification') {
       const snsBody = body as SnsMessage;
       let payload: SesNotificationPayload;
@@ -91,7 +87,6 @@ export class EmailEventsController {
       return this.handleSesEvent(payload);
     }
 
-    // Fallback: try to parse as direct SES event (for testing)
     if ('notificationType' in body || 'eventType' in body) {
       return this.handleSesEvent(body as unknown as SesNotificationPayload);
     }
@@ -112,10 +107,9 @@ export class EmailEventsController {
       return { ok: true, ignored: true };
     }
 
-    // Extract tags from SES mail object
     const tags = payload.mail.tags ?? [];
     const getTag = (name: string): string | undefined =>
-      tags.find((t) => t.name === name)?.value[0];
+      tags.find((tag) => tag.name === name)?.value[0];
 
     const campaignId = getTag('campaignId');
     const tenantId = getTag('tenantId');

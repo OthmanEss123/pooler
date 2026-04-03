@@ -1,7 +1,7 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
-import { PrismaService } from '../../database/prisma/prisma.service';
+import { EmailEventsService } from '../../modules/email-events/email-events.service';
 import { EmailProviderService } from '../../modules/email-provider/email-provider.service';
 import type { SendEmailPayload } from '../services/campaign-queue.service';
 
@@ -10,8 +10,8 @@ export class EmailProcessor extends WorkerHost {
   private readonly logger = new Logger(EmailProcessor.name);
 
   constructor(
-    private readonly prisma: PrismaService,
     private readonly emailProvider: EmailProviderService,
+    private readonly emailEvents: EmailEventsService,
   ) {
     super();
   }
@@ -50,17 +50,19 @@ export class EmailProcessor extends WorkerHost {
         },
       });
 
-      // Create SENT event
-      await this.prisma.emailEvent.create({
-        data: {
-          tenantId,
+      // Track SENT event via EmailEventsService
+      // → updates campaign snapshot + contact status + ClickHouse mirror
+      await this.emailEvents.trackEvent(
+        {
           campaignId,
           contactId,
           type: 'SENT',
           provider: result.provider,
           providerId: result.messageId,
+          metadata: { email: contactEmail },
         },
-      });
+        tenantId,
+      );
 
       this.logger.debug(
         `Email sent to ${contactEmail} messageId=${result.messageId}`,

@@ -110,86 +110,71 @@ export class SegmentsService {
   }
 
   async syncMembers(tenantId: string, segmentId: string) {
-    const segment = await this.prisma.segment.findFirst({
-      where: {
-        id: segmentId,
-        tenantId,
-      },
-    });
-
-    if (!segment) {
-      throw new NotFoundException('Segment not found.');
-    }
-
+    const segment = await this.findOne(tenantId, segmentId);
     const conditions = segment.conditions as unknown as SegmentConditionGroup;
     this.evaluator.validateConditions(conditions);
 
-    const existingMembers = await this.prisma.segmentMember.findMany({
-      where: {
-        segmentId: segment.id,
-      },
-    });
-    const existingMemberIds = new Set(
-      existingMembers.map((member) => member.contactId),
+    const [newContacts, currentMembers] = await Promise.all([
+      this.prisma.contact.findMany({
+        where: this.evaluator.buildWhere(tenantId, conditions),
+        select: { id: true },
+      }),
+      this.prisma.segmentMember.findMany({
+        where: { segmentId: segment.id },
+        select: { contactId: true },
+      }),
+    ]);
+
+    const newIds = new Set(newContacts.map((contact) => contact.id));
+    const currentIds = new Set(
+      currentMembers.map((member) => member.contactId),
     );
 
-    const where = this.evaluator.buildWhere(tenantId, conditions);
-    const contacts = await this.prisma.contact.findMany({
-      where,
-      select: {
-        id: true,
-      },
-    });
-
-    const memberRows = contacts.map((contact) => ({
-      segmentId: segment.id,
-      contactId: contact.id,
-    }));
-    const newlyAddedContactIds = contacts
-      .map((contact) => contact.id)
-      .filter((contactId) => !existingMemberIds.has(contactId));
+    const toAdd = [...newIds].filter((id) => !currentIds.has(id));
+    const toRemove = [...currentIds].filter((id) => !newIds.has(id));
 
     await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      await tx.segmentMember.deleteMany({
-        where: {
-          segmentId: segment.id,
-        },
-      });
+      if (toRemove.length > 0) {
+        await tx.segmentMember.deleteMany({
+          where: {
+            segmentId: segment.id,
+            contactId: { in: toRemove },
+          },
+        });
+      }
 
-      if (memberRows.length > 0) {
+      if (toAdd.length > 0) {
         await tx.segmentMember.createMany({
-          data: memberRows,
+          data: toAdd.map((contactId) => ({
+            segmentId: segment.id,
+            contactId,
+          })),
           skipDuplicates: true,
         });
       }
 
       await tx.segment.update({
-        where: {
-          id: segment.id,
-        },
+        where: { id: segment.id },
         data: {
-          contactCount: contacts.length,
+          contactCount: newIds.size,
           lastSyncAt: new Date(),
         },
       });
     });
 
-    if (newlyAddedContactIds.length > 0) {
-      const flows = await this.flowsService.findActiveFlowsByTrigger(
+    for (const contactId of toAdd) {
+      void this.flowsService.triggerFlowsSafe(
         tenantId,
         FlowTriggerType.SEGMENT_ENTER,
+        contactId,
       );
-
-      for (const contactId of newlyAddedContactIds) {
-        for (const flow of flows) {
-          await this.flowsService.triggerFlow(tenantId, flow.id, contactId);
-        }
-      }
     }
 
     return {
       segmentId: segment.id,
-      synced: contacts.length,
+      synced: newIds.size,
+      added: toAdd.length,
+      removed: toRemove.length,
     };
   }
 

@@ -1,19 +1,25 @@
 import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Queue } from 'bullmq';
 
 @Injectable()
 export class FlowQueueService {
   private readonly logger = new Logger(FlowQueueService.name);
-  private readonly isTest = process.env.NODE_ENV === 'test';
+  private readonly queueEnabled: boolean;
 
   constructor(
+    private readonly config: ConfigService,
     @Optional() @InjectQueue('flow') private readonly flowQueue?: Queue,
-  ) {}
+  ) {
+    this.queueEnabled = this.config.get<boolean>('QUEUE_ENABLED', true);
+  }
 
   async triggerExecution(executionId: string) {
-    if (this.isTest || !this.flowQueue) {
-      this.logger.log(`[TEST] triggerExecution simule: ${executionId}`);
+    if (!this.queueEnabled || !this.flowQueue) {
+      this.logger.log(
+        `[QUEUE_DISABLED] triggerExecution ignored: ${executionId}`,
+      );
       return;
     }
 
@@ -33,9 +39,9 @@ export class FlowQueueService {
     nextStepIndex: number,
     delayMs: number,
   ) {
-    if (this.isTest || !this.flowQueue) {
+    if (!this.queueEnabled || !this.flowQueue) {
       this.logger.log(
-        `[TEST] resumeExecution simule: ${executionId} -> ${nextStepIndex}`,
+        `[QUEUE_DISABLED] resumeExecution ignored: ${executionId} -> ${nextStepIndex}`,
       );
       return;
     }

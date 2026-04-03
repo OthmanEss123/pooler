@@ -1,4 +1,4 @@
-import {
+﻿import {
   Injectable,
   Logger,
   OnModuleDestroy,
@@ -60,7 +60,17 @@ export class ClickhouseService implements OnModuleInit, OnModuleDestroy {
   }
 
   async exec(sql: string): Promise<void> {
-    await this.getClient().command({ query: sql });
+    await this.command(sql);
+  }
+
+  async command(
+    sql: string,
+    queryParams: Record<string, unknown> = {},
+  ): Promise<void> {
+    await this.getClient().command({
+      query: sql,
+      query_params: queryParams,
+    });
   }
 
   async query<T = unknown>(
@@ -125,12 +135,39 @@ export class ClickhouseService implements OnModuleInit, OnModuleDestroy {
         campaign_id String,
         contact_id String,
         type String,
+        revenue Float64,
+        event_date Date,
         occurred_at DateTime
       )
       ENGINE = MergeTree()
-      PARTITION BY toYYYYMM(occurred_at)
-      ORDER BY (tenant_id, campaign_id, occurred_at)
+      PARTITION BY toYYYYMM(event_date)
+      ORDER BY (tenant_id, event_date, campaign_id, type, contact_id)
       TTL occurred_at + INTERVAL 2 YEAR
+    `);
+
+    await this.exec(`
+      ALTER TABLE email_events_log
+      ADD COLUMN IF NOT EXISTS contact_id String DEFAULT '' AFTER campaign_id
+    `);
+
+    await this.exec(`
+      ALTER TABLE email_events_log
+      ADD COLUMN IF NOT EXISTS type String DEFAULT '' AFTER contact_id
+    `);
+
+    await this.exec(`
+      ALTER TABLE email_events_log
+      ADD COLUMN IF NOT EXISTS occurred_at DateTime DEFAULT now() AFTER type
+    `);
+
+    await this.exec(`
+      ALTER TABLE email_events_log
+      ADD COLUMN IF NOT EXISTS revenue Float64 DEFAULT 0 AFTER type
+    `);
+
+    await this.exec(`
+      ALTER TABLE email_events_log
+      ADD COLUMN IF NOT EXISTS event_date Date DEFAULT toDate(occurred_at) AFTER revenue
     `);
 
     await this.exec(`

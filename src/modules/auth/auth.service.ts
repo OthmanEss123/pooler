@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -7,18 +8,28 @@ import { JwtService } from '@nestjs/jwt';
 import { ApiKeyScope, UserRole } from '@prisma/client';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import * as bcrypt from 'bcrypt';
+import { AuditService } from '../../common/services/audit.service';
 import { PrismaService } from '../../database/prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+
+interface AuthAuditContext {
+  requestId?: string;
+  tenantId?: string | null;
+  userId?: string | null;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+}
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
+    private readonly auditService: AuditService,
   ) {}
 
-  async register(dto: RegisterDto) {
+  async register(dto: RegisterDto, auditContext?: AuthAuditContext) {
     const normalizedEmail = dto.email.toLowerCase();
 
     const existingUser = await this.prisma.user.findUnique({
@@ -76,6 +87,8 @@ export class AuthService {
       user.role,
     );
 
+    this.recordSuccessfulRegister(user, auditContext);
+
     return {
       user: this.sanitizeUser(user),
       tenant,
@@ -83,7 +96,7 @@ export class AuthService {
     };
   }
 
-  async login(dto: LoginDto) {
+  async login(dto: LoginDto, auditContext?: AuthAuditContext) {
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email.toLowerCase() },
       include: { tenant: true },
@@ -111,6 +124,8 @@ export class AuthService {
       user.role,
     );
 
+    this.recordSuccessfulLogin(user, auditContext);
+
     return {
       user: this.sanitizeUser(user),
       ...tokens,
@@ -122,6 +137,7 @@ export class AuthService {
     tokenFamily: string;
     userAgent?: string;
     ipAddress?: string;
+    requestId?: string;
   }) {
     const incomingHash = this.sha256(params.refreshToken);
 
@@ -183,6 +199,19 @@ export class AuthService {
       return created;
     });
 
+    this.recordSuccessfulRefresh(
+      {
+        id: existing.user.id,
+        tenantId: existing.user.tenantId,
+        email: existing.user.email,
+      },
+      {
+        requestId: params.requestId,
+        ipAddress: params.ipAddress,
+        userAgent: params.userAgent,
+      },
+    );
+
     return {
       accessToken,
       refreshToken: newRawRefreshToken,
@@ -190,19 +219,54 @@ export class AuthService {
     };
   }
 
-  async logout(tokenFamily: string) {
+  async logout(tokenFamily: string, auditContext?: AuthAuditContext) {
+    const tokenContext =
+      auditContext?.tenantId && auditContext.userId
+        ? {
+            tenantId: auditContext.tenantId,
+            userId: auditContext.userId,
+          }
+        : await this.prisma.refreshToken.findFirst({
+            where: { tokenFamily },
+            orderBy: { createdAt: 'desc' },
+            select: {
+              tenantId: true,
+              userId: true,
+            },
+          });
+
     await this.prisma.refreshToken.updateMany({
       where: { tokenFamily },
       data: { revokedAt: new Date() },
     });
+
+    if (tokenContext?.tenantId && tokenContext.userId) {
+      this.auditService.log({
+        tenantId: tokenContext.tenantId,
+        userId: tokenContext.userId,
+        action: 'AUTH_LOGOUT',
+        entity: 'AUTH',
+        entityId: tokenContext.userId,
+        metadata: {
+          tokenFamily,
+          requestId: auditContext?.requestId ?? null,
+        },
+        ipAddress: auditContext?.ipAddress ?? null,
+        userAgent: auditContext?.userAgent ?? null,
+      });
+    }
 
     return { ok: true };
   }
 
   async createApiKey(params: {
     tenantId: string;
+    userId?: string | null;
     name: string;
     scope?: ApiKeyScope;
+    requestId?: string;
+    ipAddress?: string | null;
+    userAgent?: string | null;
   }) {
     const rawSecret = randomBytes(32).toString('hex');
     const rawKey = `pk_${rawSecret}`;
@@ -217,6 +281,22 @@ export class AuthService {
         keyHash,
         scope: params.scope ?? ApiKeyScope.FULL_ACCESS,
       },
+    });
+
+    this.auditService.log({
+      tenantId: params.tenantId,
+      userId: params.userId ?? null,
+      action: 'API_KEY_CREATED',
+      entity: 'API_KEY',
+      entityId: apiKey.id,
+      metadata: {
+        name: apiKey.name,
+        scope: apiKey.scope,
+        prefix: apiKey.prefix,
+        requestId: params.requestId ?? null,
+      },
+      ipAddress: params.ipAddress ?? null,
+      userAgent: params.userAgent ?? null,
     });
 
     return {
@@ -279,6 +359,55 @@ export class AuthService {
     };
   }
 
+  async switchTenant(userId: string, targetTenantId: string) {
+    const membership = await this.prisma.membership.findUnique({
+      where: {
+        tenantId_userId: { tenantId: targetTenantId, userId },
+      },
+      include: { tenant: true },
+    });
+
+    if (!membership || !membership.tenant.isActive) {
+      throw new ForbiddenException(
+        "Vous n'etes pas membre de cette organisation",
+      );
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user || !user.isActive) {
+      throw new UnauthorizedException();
+    }
+
+    const tokens = await this.generateTokens(
+      userId,
+      targetTenantId,
+      user.email,
+      membership.role,
+    );
+
+    return { tokens, tenant: membership.tenant };
+  }
+
+  async getMyTenants(userId: string) {
+    return this.prisma.membership.findMany({
+      where: { userId },
+      include: {
+        tenant: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            isActive: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
   private async generateTokens(
     userId: string,
     tenantId: string,
@@ -313,6 +442,79 @@ export class AuthService {
     };
   }
 
+  private recordSuccessfulRegister(
+    user: {
+      id: string;
+      tenantId: string;
+      email: string;
+    },
+    auditContext?: AuthAuditContext,
+  ) {
+    this.auditService.log({
+      tenantId: user.tenantId,
+      userId: user.id,
+      action: 'AUTH_REGISTER',
+      entity: 'USER',
+      entityId: user.id,
+      metadata: {
+        email: user.email,
+        requestId: auditContext?.requestId ?? null,
+      },
+      ipAddress: auditContext?.ipAddress ?? null,
+      userAgent: auditContext?.userAgent ?? null,
+    });
+  }
+
+  private recordSuccessfulLogin(
+    user: {
+      id: string;
+      tenantId: string;
+      email: string;
+    },
+    auditContext?: AuthAuditContext,
+  ) {
+    this.auditService.log({
+      tenantId: user.tenantId,
+      userId: user.id,
+      action: 'AUTH_LOGIN',
+      entity: 'AUTH',
+      entityId: user.id,
+      metadata: {
+        email: user.email,
+        requestId: auditContext?.requestId ?? null,
+      },
+      ipAddress: auditContext?.ipAddress ?? null,
+      userAgent: auditContext?.userAgent ?? null,
+    });
+  }
+
+  private recordSuccessfulRefresh(
+    user: {
+      id: string;
+      tenantId: string;
+      email: string;
+    },
+    auditContext: {
+      requestId?: string;
+      ipAddress?: string;
+      userAgent?: string;
+    },
+  ) {
+    this.auditService.log({
+      tenantId: user.tenantId,
+      userId: user.id,
+      action: 'AUTH_REFRESH',
+      entity: 'AUTH',
+      entityId: user.id,
+      metadata: {
+        email: user.email,
+        requestId: auditContext.requestId ?? null,
+      },
+      ipAddress: auditContext.ipAddress ?? null,
+      userAgent: auditContext.userAgent ?? null,
+    });
+  }
+
   private sanitizeUser(user: {
     id: string;
     email: string;
@@ -339,9 +541,6 @@ export class AuthService {
     return createHash('sha256').update(value).digest('hex');
   }
 
-  /**
-   * Constant-time comparison to prevent timing attacks on secret values.
-   */
   private safeCompare(a: string, b: string): boolean {
     if (a.length !== b.length) {
       return false;

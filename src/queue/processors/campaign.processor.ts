@@ -63,6 +63,12 @@ export class CampaignProcessor extends WorkerHost {
       `Enqueuing ${subscribedContacts.length} emails for campaign ${campaignId}`,
     );
 
+    // Update totalSent counter while still SENDING
+    await this.prisma.campaign.update({
+      where: { id: campaignId },
+      data: { totalSent: subscribedContacts.length },
+    });
+
     // Enqueue individual email jobs
     for (const member of subscribedContacts) {
       await this.campaignQueue.sendEmail({
@@ -79,11 +85,10 @@ export class CampaignProcessor extends WorkerHost {
       });
     }
 
-    // Update campaign counters
+    // Mark SENT only after ALL email jobs are enqueued
     await this.prisma.campaign.update({
       where: { id: campaignId },
       data: {
-        totalSent: subscribedContacts.length,
         status: 'SENT',
         sentAt: new Date(),
       },

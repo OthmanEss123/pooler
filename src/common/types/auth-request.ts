@@ -21,4 +21,6 @@ export interface AuthCookies {
 export type AuthRequest = Request & {
   user?: AuthenticatedUser;
   cookies?: AuthCookies;
+  requestId?: string;
+  startedAt?: number;
 };

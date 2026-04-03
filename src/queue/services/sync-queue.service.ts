@@ -1,38 +1,91 @@
 // src/queue/services/sync-queue.service.ts
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Optional,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
+import { ConfigService } from '@nestjs/config';
 import { Queue } from 'bullmq';
+
+export interface SyncShopifyPayload {
+  tenantId: string;
+  full: boolean;
+}
+
+export interface SyncSegmentPayload {
+  tenantId: string;
+  segmentId: string;
+}
+
+export interface SyncGoogleAdsPayload {
+  tenantId: string;
+  campaignId?: string;
+  date?: string;
+  spend?: number;
+  impressions?: number;
+  clicks?: number;
+  conversions?: number;
+}
 
 @Injectable()
 export class SyncQueueService {
   private readonly logger = new Logger(SyncQueueService.name);
-  private readonly isTest = process.env.NODE_ENV === 'test';
+  private readonly queueEnabled: boolean;
 
   constructor(
-    @InjectQueue('sync') private readonly syncQueue?: Queue,
-  ) {}
+    private readonly config: ConfigService,
+    @Optional() @InjectQueue('sync') private readonly syncQueue?: Queue,
+  ) {
+    this.queueEnabled = this.config.get<boolean>('QUEUE_ENABLED', true);
+  }
+
+  assertAvailable() {
+    if (!this.queueEnabled) {
+      return;
+    }
+
+    if (!this.syncQueue) {
+      throw new ServiceUnavailableException(
+        'Sync queue infrastructure is not available',
+      );
+    }
+  }
 
   async syncShopify(tenantId: string, full = false) {
-    if (this.isTest) return;
-    return this.syncQueue!.add(
+    if (!this.queueEnabled || !this.syncQueue) {
+      this.logger.log(`[QUEUE_DISABLED] syncShopify ignored: ${tenantId}`);
+      return;
+    }
+
+    return this.syncQueue.add(
       'sync-shopify',
       { tenantId, full },
       { attempts: 3, backoff: { type: 'fixed', delay: 10000 } },
     );
   }
 
-  async syncGoogleAds(tenantId: string) {
-    if (this.isTest) return;
-    return this.syncQueue!.add(
-      'sync-google-ads',
-      { tenantId },
-      { attempts: 3 },
-    );
+  async syncGoogleAds(payload: SyncGoogleAdsPayload | string) {
+    if (!this.queueEnabled || !this.syncQueue) {
+      const tenantId = typeof payload === 'string' ? payload : payload.tenantId;
+      this.logger.log(`[QUEUE_DISABLED] syncGoogleAds ignored: ${tenantId}`);
+      return;
+    }
+
+    const jobPayload =
+      typeof payload === 'string' ? { tenantId: payload } : payload;
+
+    return this.syncQueue.add('sync-google-ads', jobPayload, { attempts: 3 });
   }
 
   async syncSegment(tenantId: string, segmentId: string) {
-    if (this.isTest) return;
-    return this.syncQueue!.add(
+    if (!this.queueEnabled || !this.syncQueue) {
+      this.logger.log(`[QUEUE_DISABLED] syncSegment ignored: ${segmentId}`);
+      return;
+    }
+
+    return this.syncQueue.add(
       'sync-segment',
       { tenantId, segmentId },
       { attempts: 2 },

@@ -8,7 +8,16 @@ export class HealthController {
 
   @Public()
   @Get()
-  check() {
-    return this.healthService.check();
+  async check() {
+    const result = await this.healthService.check();
+
+    if (process.env.NODE_ENV === 'production') {
+      return {
+        status: result.status,
+        timestamp: result.timestamp,
+      };
+    }
+
+    return result;
   }
 }

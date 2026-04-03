@@ -28,10 +28,20 @@ export default () => ({
   },
 
   grpc: {
+    host: process.env.GRPC_HOST ?? '127.0.0.1',
     port: Number(process.env.GRPC_PORT ?? 50051),
+    sharedSecret: process.env.GRPC_SHARED_SECRET ?? '',
   },
 
   encryption: {
     key: process.env.ENCRYPTION_KEY ?? '',
+  },
+
+  monitoring: {
+    metricsToken: process.env.METRICS_TOKEN ?? '',
+  },
+
+  agents: {
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? '',
   },
 });

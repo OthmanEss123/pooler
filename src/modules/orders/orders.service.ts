@@ -5,6 +5,7 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { QueryOrdersDto } from './dto/query-orders.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { FlowTriggerType } from '../flows/dto/create-flow.dto';
+import { SuppressionsService } from '../contacts/suppressions.service';
 import { FlowsService } from '../flows/flows.service';
 
 type PrismaLike = PrismaService | Prisma.TransactionClient;
@@ -19,6 +20,7 @@ export class OrdersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly flowsService: FlowsService,
+    private readonly suppressionsService: SuppressionsService,
   ) {}
 
   async create(tenantId: string, dto: CreateOrderDto) {
@@ -75,9 +77,10 @@ export class OrdersService {
 
     if (this.isPostPurchaseStatus(result.status)) {
       triggerTypes.unshift(FlowTriggerType.POST_PURCHASE);
+      this.syncSuppressionTargets(tenantId);
     }
 
-    await this.triggerFlows(tenantId, result.contactId, triggerTypes);
+    this.triggerFlows(tenantId, result.contactId, triggerTypes);
 
     return result;
   }
@@ -143,7 +146,8 @@ export class OrdersService {
       !this.isPostPurchaseStatus(existing.status) &&
       this.isPostPurchaseStatus(order.status)
     ) {
-      await this.triggerFlows(tenantId, existing.contactId, [
+      this.syncSuppressionTargets(tenantId);
+      this.triggerFlows(tenantId, existing.contactId, [
         FlowTriggerType.POST_PURCHASE,
       ]);
     }
@@ -177,21 +181,21 @@ export class OrdersService {
     return status === OrderStatus.PAID || status === OrderStatus.FULFILLED;
   }
 
-  private async triggerFlows(
+  private triggerFlows(
     tenantId: string,
     contactId: string,
     triggerTypes: FlowTriggerType[],
-  ) {
+  ): void {
     for (const type of triggerTypes) {
-      const flows = await this.flowsService.findActiveFlowsByTrigger(
-        tenantId,
-        type,
-      );
-
-      for (const flow of flows) {
-        await this.flowsService.triggerFlow(tenantId, flow.id, contactId);
-      }
+      void this.flowsService.triggerFlowsSafe(tenantId, type, contactId);
     }
+  }
+
+  private syncSuppressionTargets(tenantId: string): void {
+    void Promise.all([
+      this.suppressionsService.syncRecentBuyersSegment(tenantId, 30),
+      this.suppressionsService.syncSuppressionsToAds(tenantId),
+    ]);
   }
 
   private async recalculateContactMetrics(

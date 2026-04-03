@@ -40,14 +40,11 @@ export class ContactsService {
       },
     });
 
-    const flows = await this.flowsService.findActiveFlowsByTrigger(
+    void this.flowsService.triggerFlowsSafe(
       tenantId,
       FlowTriggerType.CONTACT_CREATED,
+      contact.id,
     );
-
-    for (const flow of flows) {
-      await this.flowsService.triggerFlow(tenantId, flow.id, contact.id);
-    }
 
     return contact;
   }

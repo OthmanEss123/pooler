@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
+﻿/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
@@ -16,7 +16,8 @@ process.env.DATABASE_URL ??=
 process.env.DIRECT_URL ??=
   'postgresql://user:password@localhost:5432/pilot_platform';
 process.env.CLICKHOUSE_URL ??= 'http://default:password@localhost:8123/pilot';
-process.env.JWT_SECRET ??= '12345678901234567890123456789012';
+process.env.JWT_SECRET ??=
+  '1234567890123456789012345678901234567890123456789012345678901234';
 process.env.JWT_EXPIRES_IN ??= '15m';
 
 describe('Orders (e2e)', () => {

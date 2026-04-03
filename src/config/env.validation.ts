@@ -2,7 +2,7 @@ import * as Joi from 'joi';
 
 export const envValidationSchema = Joi.object({
   NODE_ENV: Joi.string()
-    .valid('development', 'production', 'test')
+    .valid('development', 'test', 'staging', 'production')
     .default('development'),
   PORT: Joi.number().port().default(3000),
   FRONTEND_URL: Joi.string().default('http://localhost:3001'),
@@ -15,22 +15,32 @@ export const envValidationSchema = Joi.object({
   CLICKHOUSE_PASSWORD: Joi.string().allow('').default(''),
   CLICKHOUSE_DB: Joi.string().default('pilot'),
 
-  JWT_SECRET: Joi.string().min(32).required(),
+  JWT_SECRET: Joi.string().min(64).required(),
   JWT_EXPIRES_IN: Joi.string().default('15m'),
 
-  QUEUE_ENABLED: Joi.boolean().truthy('true').falsy('false').optional(),
+  QUEUE_ENABLED: Joi.boolean().truthy('true').falsy('false').default(true),
   REDIS_URL: Joi.string().default('redis://localhost:6379'),
-  ENCRYPTION_KEY: Joi.string().length(64).optional(),
+  ENCRYPTION_KEY: Joi.alternatives().conditional('NODE_ENV', {
+    is: 'test',
+    then: Joi.string()
+      .pattern(/^[a-fA-F0-9]{64}$/)
+      .optional(),
+    otherwise: Joi.string()
+      .pattern(/^[a-fA-F0-9]{64}$/)
+      .required(),
+  }),
+  METRICS_TOKEN: Joi.string().min(16).optional(),
+  GRPC_HOST: Joi.string().default('127.0.0.1'),
   GRPC_PORT: Joi.number().port().default(50051),
+  GRPC_SHARED_SECRET: Joi.string().allow('').optional(),
 
-  // AWS SES
   AWS_REGION: Joi.string().default('eu-west-1'),
   AWS_ACCESS_KEY_ID: Joi.string().optional(),
   AWS_SECRET_ACCESS_KEY: Joi.string().optional(),
   SES_CONFIG_SET: Joi.string().default('pilot-events'),
   SES_FROM_DEFAULT: Joi.string().default('noreply@pilot.local'),
+  NARRATIVE_AGENT_URL: Joi.string().default('http://localhost:8001'),
 
-  // SNS webhook
   SNS_TOPIC_ARN: Joi.string().optional(),
 
   APP_VERSION: Joi.string().default('1.0.0'),
