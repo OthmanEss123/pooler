@@ -33,6 +33,8 @@ describe('Security and metrics (e2e)', () => {
         contact: { count: jest.fn().mockResolvedValue(42) },
         campaign: { count: jest.fn().mockResolvedValue(7) },
         emailEvent: { count: jest.fn().mockResolvedValue(21) },
+        flow: { count: jest.fn().mockResolvedValue(5) },
+        insight: { count: jest.fn().mockResolvedValue(9) },
         isHealthy: jest.fn().mockResolvedValue(true),
       })
       .overrideProvider(ClickhouseService)
@@ -88,6 +90,8 @@ describe('Security and metrics (e2e)', () => {
       contactsTotal: 42,
       campaignsSent30d: 7,
       emailsSent30d: 21,
+      flowsActive: 5,
+      insightsUnread: 9,
       jobsWaiting: 6,
       jobsFailed: 8,
     });

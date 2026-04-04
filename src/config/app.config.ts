@@ -3,7 +3,7 @@ export default () => ({
     nodeEnv: process.env.NODE_ENV ?? 'development',
     port: Number(process.env.PORT ?? 3000),
     frontendUrl: process.env.FRONTEND_URL ?? 'http://localhost:3001',
-    version: process.env.APP_VERSION ?? '1.0.0',
+    version: process.env.APP_VERSION ?? '2.0.0',
   },
 
   database: {

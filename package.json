@@ -1,8 +1,8 @@
 {
-  "name": "api",
-  "version": "0.0.1",
-  "description": "",
-  "author": "",
+  "name": "pilot-platform-api",
+  "version": "2.0.0",
+  "description": "Pilot Platform - Backend API",
+  "author": "Pilot Team",
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
@@ -107,3 +107,4 @@
     "testEnvironment": "node"
   }
 }
+

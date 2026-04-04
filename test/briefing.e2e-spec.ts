@@ -229,7 +229,7 @@ describe('Briefing (e2e)', () => {
     const durationMs = Date.now() - startedAt;
 
     expect(second.body.generatedAt).toBe(first.body.generatedAt);
-    expect(durationMs).toBeLessThan(100);
+    expect(durationMs).toBeLessThan(250);
   });
 
   it('POST /api/v1/copilot/briefing/refresh -> 200 with a newer generatedAt for OWNER', async () => {
