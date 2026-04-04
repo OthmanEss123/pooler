@@ -1,12 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { OrderStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma/prisma.service';
+import { SuppressionsService } from '../contacts/suppressions.service';
+import { FlowTriggerType } from '../flows/dto/create-flow.dto';
+import { FlowsService } from '../flows/flows.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { QueryOrdersDto } from './dto/query-orders.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
-import { FlowTriggerType } from '../flows/dto/create-flow.dto';
-import { SuppressionsService } from '../contacts/suppressions.service';
-import { FlowsService } from '../flows/flows.service';
 
 type PrismaLike = PrismaService | Prisma.TransactionClient;
 
@@ -30,11 +30,13 @@ export class OrdersService {
         tenantId,
         dto.contactEmail,
       );
+      const externalId = dto.externalId ?? this.buildExternalId(tenantId);
 
       const order = await tx.order.create({
         data: {
+          tenantId,
           contactId: contact.id,
-          externalId: dto.externalId,
+          externalId,
           orderNumber: dto.orderNumber,
           status: dto.status,
           totalAmount: new Prisma.Decimal(dto.totalAmount),
@@ -43,15 +45,20 @@ export class OrdersService {
               ? null
               : new Prisma.Decimal(dto.subtotal),
           currency: dto.currency,
+          source: 'manual',
           placedAt: new Date(dto.placedAt),
         },
       });
 
       if (dto.items.length > 0) {
         await tx.orderItem.createMany({
-          data: dto.items.map((item) => ({
+          data: dto.items.map((item, index) => ({
+            tenantId,
             orderId: order.id,
+            externalId: `${externalId}-item-${index + 1}`,
+            productExternalId: null,
             name: item.name,
+            sku: null,
             quantity: item.quantity,
             unitPrice: new Prisma.Decimal(item.unitPrice),
             totalPrice: new Prisma.Decimal(item.totalPrice),
@@ -62,7 +69,7 @@ export class OrdersService {
       await this.recalculateContactMetrics(tx, contact.id);
 
       const created = await tx.order.findFirst({
-        where: { id: order.id, contact: { tenantId } },
+        where: { id: order.id, tenantId },
         include: { items: true },
       });
 
@@ -87,7 +94,7 @@ export class OrdersService {
 
   async findAll(tenantId: string, query: QueryOrdersDto) {
     const where: Prisma.OrderWhereInput = {
-      contact: { tenantId },
+      tenantId,
     };
 
     if (query.status) {
@@ -113,7 +120,7 @@ export class OrdersService {
 
   async findOne(tenantId: string, id: string) {
     const order = await this.prisma.order.findFirst({
-      where: { id, contact: { tenantId } },
+      where: { id, tenantId },
       include: { items: true },
     });
 
@@ -126,7 +133,7 @@ export class OrdersService {
 
   async updateStatus(tenantId: string, id: string, dto: UpdateOrderStatusDto) {
     const existing = await this.prisma.order.findFirst({
-      where: { id, contact: { tenantId } },
+      where: { id, tenantId },
       select: { id: true, contactId: true, status: true },
     });
 
@@ -173,6 +180,7 @@ export class OrdersService {
       data: {
         tenantId,
         email: normalizedEmail,
+        sourceChannel: 'manual',
       },
     });
   }
@@ -229,5 +237,9 @@ export class OrdersService {
         lastOrderAt: paidOrders[paidOrders.length - 1]?.placedAt ?? null,
       },
     });
+  }
+
+  private buildExternalId(tenantId: string) {
+    return `manual-${tenantId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }
 }

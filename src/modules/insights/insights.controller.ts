@@ -1,4 +1,4 @@
-import {
+﻿import {
   Controller,
   Delete,
   Get,
@@ -12,6 +12,7 @@ import {
 import { CurrentTenant } from '../../common/decorators/current-tenant.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { StockAlertService } from '../copilot/stock-alert.service';
 import { QueryInsightsDto } from './dto/query-insights.dto';
 import { HealthScoreService } from './health-score.service';
 import { InsightsService } from './insights.service';
@@ -22,6 +23,7 @@ export class InsightsController {
   constructor(
     private readonly insightsService: InsightsService,
     private readonly healthScoreService: HealthScoreService,
+    private readonly stockAlertService: StockAlertService,
   ) {}
 
   @Get('health-scores/distribution')
@@ -50,7 +52,15 @@ export class InsightsController {
   @Post('generate')
   @HttpCode(HttpStatus.OK)
   @Roles('OWNER', 'ADMIN')
-  generate(@CurrentTenant() tenantId: string) {
-    return this.insightsService.generateInsights(tenantId);
+  async generate(@CurrentTenant() tenantId: string) {
+    const [insights, stockAlerts] = await Promise.all([
+      this.insightsService.generateInsights(tenantId),
+      this.stockAlertService.detectLowStock(tenantId),
+    ]);
+
+    return {
+      ...insights,
+      stockAlerts: stockAlerts.created,
+    };
   }
 }

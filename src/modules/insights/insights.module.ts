@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+﻿import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '../../database/prisma/prisma.module';
 import { CopilotModule } from '../copilot/copilot.module';
 import { EmailProviderModule } from '../email-provider/email-provider.module';
@@ -9,7 +9,12 @@ import { InsightsCronService } from './insights-cron.service';
 import { InsightsService } from './insights.service';
 
 @Module({
-  imports: [PrismaModule, EmailProviderModule, GoogleAdsModule, CopilotModule],
+  imports: [
+    PrismaModule,
+    EmailProviderModule,
+    GoogleAdsModule,
+    forwardRef(() => CopilotModule),
+  ],
   controllers: [InsightsController],
   providers: [InsightsService, InsightsCronService, HealthScoreService],
   exports: [InsightsService, HealthScoreService],

@@ -8,6 +8,7 @@ import { EmailEventsModule } from '../modules/email-events/email-events.module';
 import { EmailProviderModule } from '../modules/email-provider/email-provider.module';
 import { FlowsModule } from '../modules/flows/flows.module';
 import { GoogleAdsModule } from '../modules/integrations/google-ads/google-ads.module';
+import { WooCommerceModule } from '../modules/integrations/woocommerce/woocommerce.module';
 import { QueueEventsService } from './queue-events.service';
 import { QueueHealthService } from './queue-health.service';
 import { CampaignProcessor } from './processors/campaign.processor';
@@ -22,10 +23,11 @@ const queueEnabled = process.env.QUEUE_ENABLED !== 'false';
 
 @Module({
   imports: [
-    AnalyticsModule,
+    forwardRef(() => AnalyticsModule),
     PrismaModule,
     forwardRef(() => FlowsModule),
     forwardRef(() => GoogleAdsModule),
+    forwardRef(() => WooCommerceModule),
     ...(queueEnabled
       ? [
           BullModule.forRootAsync({

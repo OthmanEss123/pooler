@@ -7,13 +7,12 @@ import { Prisma, SegmentType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma/prisma.service';
 import { FlowTriggerType } from '../flows/dto/create-flow.dto';
 import { FlowsService } from '../flows/flows.service';
+import { EmbeddingsService } from '../contacts/embeddings.service';
 import { CreateSegmentDto } from './dto/create-segment.dto';
 import { SegmentEvaluator } from './engines/segment-evaluator';
 import type { SegmentConditionGroup } from './types/segment.types';
 
-const toInputJsonValue = (
-  value: SegmentConditionGroup,
-): Prisma.InputJsonValue =>
+const toInputJsonValue = (value: unknown): Prisma.InputJsonValue =>
   JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 
 @Injectable()
@@ -22,10 +21,15 @@ export class SegmentsService {
     private readonly prisma: PrismaService,
     private readonly evaluator: SegmentEvaluator,
     private readonly flowsService: FlowsService,
+    private readonly embeddingsService: EmbeddingsService,
   ) {}
 
   async create(tenantId: string, dto: CreateSegmentDto) {
-    this.evaluator.validateConditions(dto.conditions);
+    if (dto.type !== SegmentType.SEMANTIC) {
+      this.evaluator.validateConditions(
+        dto.conditions as unknown as SegmentConditionGroup,
+      );
+    }
 
     const existing = await this.prisma.segment.findFirst({
       where: {
@@ -48,7 +52,7 @@ export class SegmentsService {
       },
     });
 
-    if (dto.type === SegmentType.STATIC) {
+    if (dto.type === SegmentType.STATIC || dto.type === SegmentType.SEMANTIC) {
       const synced = await this.syncMembers(tenantId, segment.id);
 
       return {
@@ -111,6 +115,16 @@ export class SegmentsService {
 
   async syncMembers(tenantId: string, segmentId: string) {
     const segment = await this.findOne(tenantId, segmentId);
+
+    if (segment.type === SegmentType.SEMANTIC) {
+      const synced = await this.syncSemanticMembers(
+        tenantId,
+        segment.id,
+        segment.conditions,
+      );
+      return synced;
+    }
+
     const conditions = segment.conditions as unknown as SegmentConditionGroup;
     this.evaluator.validateConditions(conditions);
 
@@ -256,5 +270,78 @@ export class SegmentsService {
         id: segmentId,
       },
     });
+  }
+
+  private async syncSemanticMembers(
+    tenantId: string,
+    segmentId: string,
+    rawConditions: unknown,
+  ) {
+    const conditions =
+      rawConditions && typeof rawConditions === 'object'
+        ? (rawConditions as Record<string, unknown>)
+        : {};
+    const sourceContactId = conditions.sourceContactId;
+    const threshold = Number(conditions.similarity ?? 0.8);
+
+    if (!sourceContactId || typeof sourceContactId !== 'string') {
+      throw new BadRequestException('sourceContactId manquant');
+    }
+
+    const similar = await this.embeddingsService.findSimilarContacts(
+      tenantId,
+      sourceContactId,
+      100,
+    );
+    const matched = similar.filter((item) => item.similarity >= threshold);
+    const currentMembers = await this.prisma.segmentMember.findMany({
+      where: { segmentId },
+      select: { contactId: true },
+    });
+    const currentIds = new Set(
+      currentMembers.map((member) => member.contactId),
+    );
+    const matchedIds = new Set(matched.map((item) => item.contact.id));
+    const toAdd = [...matchedIds].filter((id) => !currentIds.has(id));
+    const toRemove = [...currentIds].filter((id) => !matchedIds.has(id));
+
+    await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      await tx.segmentMember.deleteMany({
+        where: { segmentId },
+      });
+
+      if (matched.length > 0) {
+        await tx.segmentMember.createMany({
+          data: matched.map((item) => ({
+            segmentId,
+            contactId: item.contact.id,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
+      await tx.segment.update({
+        where: { id: segmentId },
+        data: {
+          contactCount: matched.length,
+          lastSyncAt: new Date(),
+        },
+      });
+    });
+
+    for (const contactId of toAdd) {
+      void this.flowsService.triggerFlowsSafe(
+        tenantId,
+        FlowTriggerType.SEGMENT_ENTER,
+        contactId,
+      );
+    }
+
+    return {
+      segmentId,
+      synced: matched.length,
+      added: toAdd.length,
+      removed: toRemove.length,
+    };
   }
 }

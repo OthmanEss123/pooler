@@ -15,6 +15,7 @@ import { CurrentTenant } from '../../common/decorators/current-tenant.decorator'
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { ContactsService } from './contacts.service';
+import { EmbeddingsService } from './embeddings.service';
 import { SuppressionsService } from './suppressions.service';
 import { BulkUpsertContactsDto } from './dto/bulk-upsert-contacts.dto';
 import { CreateContactDto } from './dto/create-contact.dto';
@@ -28,6 +29,7 @@ export class ContactsController {
   constructor(
     private readonly contactsService: ContactsService,
     private readonly suppressionsService: SuppressionsService,
+    private readonly embeddingsService: EmbeddingsService,
   ) {}
 
   @Get()
@@ -42,6 +44,35 @@ export class ContactsController {
     @Query() query: RecentBuyersQueryDto,
   ) {
     return this.suppressionsService.getRecentBuyers(tenantId, query.days);
+  }
+
+  @Post('embed')
+  @Roles('OWNER', 'ADMIN')
+  async embedContacts(
+    @CurrentTenant() tenantId: string,
+    @Body() body: { contactId?: string },
+  ) {
+    if (body?.contactId) {
+      return this.embeddingsService.embedContact(tenantId, body.contactId);
+    }
+
+    return this.embeddingsService.embedAllContacts(tenantId);
+  }
+
+  @Get(':id/similar')
+  @Roles('OWNER', 'ADMIN')
+  getSimilarContacts(
+    @CurrentTenant() tenantId: string,
+    @Param('id') id: string,
+    @Query('limit') limit?: string,
+  ) {
+    const parsedLimit = Math.min(Math.max(Number(limit || 10), 1), 50);
+
+    return this.embeddingsService.findSimilarContacts(
+      tenantId,
+      id,
+      parsedLimit,
+    );
   }
 
   @Get(':id')

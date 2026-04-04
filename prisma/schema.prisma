@@ -30,6 +30,7 @@ enum SegmentType {
   DYNAMIC
   STATIC
   GA4
+  SEMANTIC
 }
 
 enum CampaignStatus {
@@ -203,14 +204,17 @@ model Contact {
   id       String @id @default(uuid())
   tenantId String
 
-  email     String
-  firstName String?
-  lastName  String?
-  phone     String?
+  email         String
+  firstName     String?
+  lastName      String?
+  phone         String?
+  sourceChannel String?
+  properties    Json?
 
-  emailStatus  EmailStatus @default(PENDING)
-  totalRevenue Decimal     @default(0) @db.Decimal(12, 2)
-  totalOrders  Int         @default(0)
+  emailStatus  EmailStatus              @default(PENDING)
+  totalRevenue Decimal                  @default(0) @db.Decimal(12, 2)
+  totalOrders  Int                      @default(0)
+  embedding    Unsupported("vector(1536)")?
 
   firstOrderAt DateTime?
   lastOrderAt  DateTime?
@@ -239,13 +243,16 @@ model Contact {
 
 model Order {
   id          String      @id @default(uuid())
+  tenantId    String
   contactId   String
-  externalId  String?     @unique
+  externalId  String
   orderNumber String?
   status      OrderStatus @default(PENDING)
   totalAmount Decimal     @db.Decimal(12, 2)
   subtotal    Decimal?    @db.Decimal(12, 2)
   currency    String
+  source      String      @default("manual")
+  rawPayload  Json?
   placedAt    DateTime
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
@@ -253,23 +260,31 @@ model Order {
   contact Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
   items   OrderItem[]
 
+  @@unique([tenantId, externalId])
+  @@index([tenantId])
   @@index([contactId])
   @@index([status])
   @@index([placedAt])
 }
 
 model OrderItem {
-  id         String   @id @default(uuid())
-  orderId    String
-  name       String
-  quantity   Int
-  unitPrice  Decimal  @db.Decimal(12, 2)
-  totalPrice Decimal  @db.Decimal(12, 2)
+  id                String   @id @default(uuid())
+  tenantId          String
+  orderId           String
+  externalId        String
+  productExternalId String?
+  name              String
+  sku               String?
+  quantity          Int
+  unitPrice         Decimal  @db.Decimal(12, 2)
+  totalPrice        Decimal  @db.Decimal(12, 2)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
   order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
+  @@unique([tenantId, externalId])
+  @@index([tenantId])
   @@index([orderId])
 }
 
@@ -320,6 +335,7 @@ model Product {
   category   String?
   tags       String[] @default([])
   isActive   Boolean  @default(true)
+  rawPayload Json?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
@@ -641,4 +657,5 @@ model AdAudienceMember {
   @@id([audienceId, contactId])
   @@index([contactId])
 }
+
 

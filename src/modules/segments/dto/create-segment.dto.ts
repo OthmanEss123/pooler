@@ -1,13 +1,11 @@
-import { Type } from 'class-transformer';
 import {
   IsEnum,
   IsNotEmpty,
+  IsObject,
   IsOptional,
   IsString,
-  ValidateNested,
 } from 'class-validator';
 import { SegmentType } from '@prisma/client';
-import { SegmentConditionDto } from './segment-condition.dto';
 
 export class CreateSegmentDto {
   @IsString()
@@ -21,7 +19,6 @@ export class CreateSegmentDto {
   @IsEnum(SegmentType)
   type!: SegmentType;
 
-  @ValidateNested()
-  @Type(() => SegmentConditionDto)
-  conditions!: SegmentConditionDto;
+  @IsObject()
+  conditions!: Record<string, unknown>;
 }

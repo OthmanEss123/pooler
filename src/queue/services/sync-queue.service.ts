@@ -1,4 +1,3 @@
-// src/queue/services/sync-queue.service.ts
 import {
   Injectable,
   Logger,
@@ -10,6 +9,11 @@ import { ConfigService } from '@nestjs/config';
 import { Queue } from 'bullmq';
 
 export interface SyncShopifyPayload {
+  tenantId: string;
+  full: boolean;
+}
+
+export interface SyncWoocommercePayload {
   tenantId: string;
   full: boolean;
 }
@@ -63,6 +67,23 @@ export class SyncQueueService {
       'sync-shopify',
       { tenantId, full },
       { attempts: 3, backoff: { type: 'fixed', delay: 10000 } },
+    );
+  }
+
+  async syncWoocommerce(tenantId: string, full = false) {
+    if (!this.queueEnabled || !this.syncQueue) {
+      this.logger.log(`[QUEUE_DISABLED] syncWoocommerce ignored: ${tenantId}`);
+      return;
+    }
+
+    return this.syncQueue.add(
+      'sync-woocommerce',
+      { tenantId, full },
+      {
+        attempts: 3,
+        removeOnComplete: 100,
+        removeOnFail: 100,
+      },
     );
   }
 

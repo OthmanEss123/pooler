@@ -42,6 +42,8 @@ export const envValidationSchema = Joi.object({
   NARRATIVE_AGENT_URL: Joi.string().default('http://localhost:8001'),
 
   SNS_TOPIC_ARN: Joi.string().optional(),
+  WOOCOMMERCE_WEBHOOK_SECRET: Joi.string().allow('').optional(),
+  OPENAI_API_KEY: Joi.string().allow('').optional(),
 
   APP_VERSION: Joi.string().default('1.0.0'),
 });

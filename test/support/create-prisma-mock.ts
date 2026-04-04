@@ -1429,6 +1429,11 @@ export const createPrismaMock = () => {
   return prismaMock;
 };
 
-export const toCookieHeader = (setCookie: string[] | undefined): string[] => {
-  return (setCookie ?? []).map((cookie) => cookie.split(';')[0]);
+export const toCookieHeader = (
+  setCookie: string | string[] | undefined,
+): string[] => {
+  const cookies =
+    typeof setCookie === 'string' ? [setCookie] : (setCookie ?? []);
+
+  return cookies.map((cookie) => cookie.split(';')[0]);
 };

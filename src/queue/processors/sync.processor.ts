@@ -1,13 +1,15 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Logger } from '@nestjs/common';
+import { Inject, Logger, forwardRef } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { PrismaService } from '../../database/prisma/prisma.service';
 import { AnalyticsService } from '../../modules/analytics/analytics.service';
 import { GoogleAdsService } from '../../modules/integrations/google-ads/google-ads.service';
+import { WooCommerceService } from '../../modules/integrations/woocommerce/woocommerce.service';
 import type {
   SyncGoogleAdsPayload,
   SyncSegmentPayload,
   SyncShopifyPayload,
+  SyncWoocommercePayload,
 } from '../services/sync-queue.service';
 
 @Processor('sync')
@@ -18,16 +20,26 @@ export class SyncProcessor extends WorkerHost {
     private readonly prisma: PrismaService,
     private readonly analyticsService: AnalyticsService,
     private readonly googleAdsService: GoogleAdsService,
+    @Inject(forwardRef(() => WooCommerceService))
+    private readonly wooCommerceService: WooCommerceService,
   ) {
     super();
   }
 
   async process(
-    job: Job<SyncShopifyPayload | SyncSegmentPayload | SyncGoogleAdsPayload>,
+    job: Job<
+      | SyncShopifyPayload
+      | SyncWoocommercePayload
+      | SyncSegmentPayload
+      | SyncGoogleAdsPayload
+    >,
   ): Promise<void> {
     switch (job.name) {
       case 'sync-shopify':
-        await this.handleSyncShopify(job as Job<SyncShopifyPayload>);
+        this.handleSyncShopify(job as Job<SyncShopifyPayload>);
+        break;
+      case 'sync-woocommerce':
+        await this.handleSyncWoocommerce(job as Job<SyncWoocommercePayload>);
         break;
       case 'sync-segment':
         await this.handleSyncSegment(job as Job<SyncSegmentPayload>);
@@ -40,13 +52,23 @@ export class SyncProcessor extends WorkerHost {
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
-  private async handleSyncShopify(job: Job<SyncShopifyPayload>): Promise<void> {
+  private handleSyncShopify(job: Job<SyncShopifyPayload>): void {
     const { tenantId, full } = job.data;
     this.logger.log(
       `Sync Shopify for tenant ${tenantId} (full=${String(full)}) - placeholder for week 8`,
     );
-    // TODO: Implement Shopify sync in week 8
+  }
+
+  private async handleSyncWoocommerce(
+    job: Job<SyncWoocommercePayload>,
+  ): Promise<void> {
+    const { tenantId, full } = job.data;
+    this.logger.log(
+      `Sync WooCommerce for tenant ${tenantId} (full=${String(full)})`,
+    );
+
+    await this.wooCommerceService.syncOrders(tenantId, full);
+    await this.wooCommerceService.syncProducts(tenantId);
   }
 
   private async handleSyncSegment(job: Job<SyncSegmentPayload>): Promise<void> {
@@ -62,9 +84,6 @@ export class SyncProcessor extends WorkerHost {
       return;
     }
 
-    // Re-evaluate segment members
-    // Note: Full evaluation logic is in SegmentsService.syncMembers
-    // This processor delegates to it via Prisma directly for decoupling
     this.logger.log(`Segment ${segmentId} sync completed`);
   }
 

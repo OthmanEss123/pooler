@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/require-await, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-base-to-string */
+/* eslint-disable @typescript-eslint/require-await, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return */
 import { OrderStatus } from '@prisma/client';
 import { createPrismaMock } from './create-prisma-mock';
 
@@ -20,6 +20,7 @@ type CommerceContact = {
 
 type CommerceOrder = {
   id: string;
+  tenantId: string;
   contactId: string;
   externalId: string | null;
   orderNumber: string | null;
@@ -55,80 +56,184 @@ export const createCommercePrismaMock = () => {
   let orderCounter = 1;
   let orderItemCounter = 1;
 
+  const matchesOrderWhere = (
+    order: CommerceOrder,
+    where?: Record<string, unknown>,
+  ) => {
+    if (!where) {
+      return true;
+    }
+
+    const contact = contacts.find(
+      (candidate) => candidate.id === order.contactId,
+    );
+    if (!contact) {
+      return false;
+    }
+
+    if (where.id && order.id !== where.id) {
+      return false;
+    }
+
+    if (where.contactId && order.contactId !== where.contactId) {
+      return false;
+    }
+
+    if (where.tenantId && order.tenantId !== where.tenantId) {
+      return false;
+    }
+
+    if (
+      where.contact &&
+      typeof where.contact === 'object' &&
+      'tenantId' in (where.contact as Record<string, unknown>) &&
+      contact.tenantId !== (where.contact as { tenantId?: string }).tenantId
+    ) {
+      return false;
+    }
+
+    if (where.status) {
+      if (typeof where.status === 'string' && order.status !== where.status) {
+        return false;
+      }
+
+      if (
+        typeof where.status === 'object' &&
+        where.status !== null &&
+        Array.isArray((where.status as { in?: string[] }).in)
+      ) {
+        if (!(where.status as { in: string[] }).in.includes(order.status)) {
+          return false;
+        }
+      }
+    }
+
+    if (
+      where.placedAt &&
+      typeof where.placedAt === 'object' &&
+      (where.placedAt as { gte?: Date }).gte
+    ) {
+      const gte = (where.placedAt as { gte: Date }).gte;
+      if (order.placedAt.getTime() < gte.getTime()) {
+        return false;
+      }
+    }
+
+    return true;
+  };
+
   const attachOrderItems = (order: CommerceOrder) => ({
     ...order,
     items: orderItems.filter((item) => item.orderId === order.id),
   });
 
-  const findContact = (where?: Record<string, unknown>) => {
-    return (
-      contacts.find((contact) => {
-        if (where?.id && contact.id !== where.id) {
-          return false;
+  const attachContactOrders = (
+    contact: CommerceContact,
+    includeOrders?: {
+      where?: Record<string, unknown>;
+      orderBy?: { placedAt?: 'asc' | 'desc' };
+    },
+  ) => {
+    const filteredOrders = orders
+      .filter((order) => order.contactId === contact.id)
+      .filter((order) =>
+        matchesOrderWhere(order, {
+          ...(includeOrders?.where ?? {}),
+          contactId: contact.id,
+        }),
+      )
+      .sort((left, right) => {
+        if (includeOrders?.orderBy?.placedAt === 'asc') {
+          return left.placedAt.getTime() - right.placedAt.getTime();
         }
 
-        if (where?.tenantId && contact.tenantId !== where.tenantId) {
-          return false;
-        }
+        return right.placedAt.getTime() - left.placedAt.getTime();
+      });
 
-        if (
-          where?.email &&
-          contact.email !== normalizeSearch(String(where.email))
-        ) {
-          return false;
-        }
+    return filteredOrders.map((order) => attachOrderItems(order));
+  };
 
-        if (where?.OR && Array.isArray(where.OR)) {
-          const matches = (where.OR as Record<string, unknown>[]).some(
-            (clause) => {
-              if (clause.email && typeof clause.email === 'object') {
-                const contains = normalizeSearch(
-                  String(
-                    (clause.email as { contains?: string }).contains ?? '',
-                  ),
-                );
-                return contact.email.includes(contains);
-              }
+  const matchesContactWhere = (
+    contact: CommerceContact,
+    where?: Record<string, unknown>,
+  ) => {
+    if (!where) {
+      return true;
+    }
 
-              if (clause.firstName && typeof clause.firstName === 'object') {
-                const contains = normalizeSearch(
-                  String(
-                    (clause.firstName as { contains?: string }).contains ?? '',
-                  ),
-                );
-                return (contact.firstName ?? '')
-                  .toLowerCase()
-                  .includes(contains);
-              }
+    if (where.id && contact.id !== where.id) {
+      return false;
+    }
 
-              if (clause.lastName && typeof clause.lastName === 'object') {
-                const contains = normalizeSearch(
-                  String(
-                    (clause.lastName as { contains?: string }).contains ?? '',
-                  ),
-                );
-                return (contact.lastName ?? '')
-                  .toLowerCase()
-                  .includes(contains);
-              }
+    if (where.tenantId && contact.tenantId !== where.tenantId) {
+      return false;
+    }
 
-              return false;
-            },
+    if (
+      typeof where.email === 'string' &&
+      contact.email !== normalizeSearch(where.email)
+    ) {
+      return false;
+    }
+
+    if (where.OR && Array.isArray(where.OR)) {
+      const matches = (where.OR as Record<string, unknown>[]).some((clause) => {
+        if (clause.email && typeof clause.email === 'object') {
+          const contains = normalizeSearch(
+            String((clause.email as { contains?: string }).contains ?? ''),
           );
-
-          if (!matches) {
-            return false;
-          }
+          return contact.email.includes(contains);
         }
 
-        return true;
-      }) ?? null
-    );
+        if (clause.firstName && typeof clause.firstName === 'object') {
+          const contains = normalizeSearch(
+            String((clause.firstName as { contains?: string }).contains ?? ''),
+          );
+          return (contact.firstName ?? '').toLowerCase().includes(contains);
+        }
+
+        if (clause.lastName && typeof clause.lastName === 'object') {
+          const contains = normalizeSearch(
+            String((clause.lastName as { contains?: string }).contains ?? ''),
+          );
+          return (contact.lastName ?? '').toLowerCase().includes(contains);
+        }
+
+        return false;
+      });
+
+      if (!matches) {
+        return false;
+      }
+    }
+
+    if (
+      where.orders &&
+      typeof where.orders === 'object' &&
+      'some' in (where.orders as Record<string, unknown>)
+    ) {
+      const orderWhere = (where.orders as { some?: Record<string, unknown> })
+        .some;
+      const hasMatchingOrder = orders.some(
+        (order) =>
+          order.contactId === contact.id &&
+          matchesOrderWhere(order, orderWhere),
+      );
+
+      if (!hasMatchingOrder) {
+        return false;
+      }
+    }
+
+    return true;
   };
 
   prismaMock.contact.findFirst = jest.fn(
     async ({ where, include }: any = {}) => {
-      const contact = findContact(where);
+      const contact =
+        contacts.find((candidate) => matchesContactWhere(candidate, where)) ??
+        null;
+
       if (!contact) {
         return null;
       }
@@ -140,13 +245,7 @@ export const createCommercePrismaMock = () => {
       return {
         ...contact,
         orders: include.orders
-          ? orders
-              .filter((order) => order.contactId === contact.id)
-              .sort(
-                (left, right) =>
-                  right.placedAt.getTime() - left.placedAt.getTime(),
-              )
-              .map((order) => attachOrderItems(order))
+          ? attachContactOrders(contact, include.orders)
           : undefined,
         segmentMembers: include.segmentMembers ? [] : undefined,
       };
@@ -154,10 +253,10 @@ export const createCommercePrismaMock = () => {
   );
 
   prismaMock.contact.findMany = jest.fn(
-    async ({ where, skip, take, orderBy }: any = {}) => {
-      const filtered = contacts.filter((contact) => {
-        return findContact({ ...where, id: contact.id }) !== null;
-      });
+    async ({ where, skip, take, orderBy, include, select }: any = {}) => {
+      const filtered = contacts.filter((contact) =>
+        matchesContactWhere(contact, where),
+      );
 
       filtered.sort((left, right) =>
         orderBy?.createdAt === 'desc'
@@ -167,14 +266,28 @@ export const createCommercePrismaMock = () => {
 
       const start = skip ?? 0;
       const end = take === undefined ? filtered.length : start + take;
-      return filtered.slice(start, end);
+      const sliced = filtered.slice(start, end);
+
+      if (select?.id) {
+        return sliced.map((contact) => ({ id: contact.id }));
+      }
+
+      if (!include) {
+        return sliced;
+      }
+
+      return sliced.map((contact) => ({
+        ...contact,
+        orders: include.orders
+          ? attachContactOrders(contact, include.orders)
+          : undefined,
+      }));
     },
   );
 
   prismaMock.contact.count = jest.fn(async ({ where }: any = {}) => {
-    return contacts.filter(
-      (contact) => findContact({ ...where, id: contact.id }) !== null,
-    ).length;
+    return contacts.filter((contact) => matchesContactWhere(contact, where))
+      .length;
   });
 
   prismaMock.contact.create = jest.fn(async ({ data }: any) => {
@@ -214,6 +327,7 @@ export const createCommercePrismaMock = () => {
           : Number(data.totalRevenue),
       updatedAt: new Date(),
     });
+
     return contact;
   });
 
@@ -230,18 +344,20 @@ export const createCommercePrismaMock = () => {
       currentIndex >= 0;
       currentIndex -= 1
     ) {
-      if (orders[currentIndex].contactId === contact.id) {
-        const orderId = orders[currentIndex].id;
-        orders.splice(currentIndex, 1);
+      if (orders[currentIndex].contactId !== contact.id) {
+        continue;
+      }
 
-        for (
-          let itemIndex = orderItems.length - 1;
-          itemIndex >= 0;
-          itemIndex -= 1
-        ) {
-          if (orderItems[itemIndex].orderId === orderId) {
-            orderItems.splice(itemIndex, 1);
-          }
+      const orderId = orders[currentIndex].id;
+      orders.splice(currentIndex, 1);
+
+      for (
+        let itemIndex = orderItems.length - 1;
+        itemIndex >= 0;
+        itemIndex -= 1
+      ) {
+        if (orderItems[itemIndex].orderId === orderId) {
+          orderItems.splice(itemIndex, 1);
         }
       }
     }
@@ -269,6 +385,7 @@ export const createCommercePrismaMock = () => {
       const now = new Date();
       const order: CommerceOrder = {
         id: `commerce-order-${orderCounter++}`,
+        tenantId: data.tenantId,
         contactId: data.contactId,
         externalId: data.externalId ?? null,
         orderNumber: data.orderNumber ?? null,
@@ -289,45 +406,9 @@ export const createCommercePrismaMock = () => {
     }),
     findMany: jest.fn(
       async ({ where, include, select, orderBy, skip, take }: any = {}) => {
-        const filtered = orders.filter((order) => {
-          const contact = contacts.find(
-            (candidate) => candidate.id === order.contactId,
-          );
-          if (!contact) {
-            return false;
-          }
-
-          if (where?.contactId && order.contactId !== where.contactId) {
-            return false;
-          }
-
-          if (
-            where?.contact?.tenantId &&
-            contact.tenantId !== where.contact.tenantId
-          ) {
-            return false;
-          }
-
-          if (where?.status) {
-            if (
-              typeof where.status === 'string' &&
-              order.status !== where.status
-            ) {
-              return false;
-            }
-
-            if (
-              typeof where.status === 'object' &&
-              Array.isArray(where.status.in)
-            ) {
-              if (!(where.status.in as string[]).includes(order.status)) {
-                return false;
-              }
-            }
-          }
-
-          return true;
-        });
+        const filtered = orders.filter((order) =>
+          matchesOrderWhere(order, where),
+        );
 
         filtered.sort((left, right) =>
           orderBy?.placedAt === 'asc'
@@ -355,27 +436,7 @@ export const createCommercePrismaMock = () => {
     ),
     findFirst: jest.fn(async ({ where, include, select }: any = {}) => {
       const order =
-        orders.find((candidate) => {
-          const contact = contacts.find(
-            (contactItem) => contactItem.id === candidate.contactId,
-          );
-          if (!contact) {
-            return false;
-          }
-
-          if (where?.id && candidate.id !== where.id) {
-            return false;
-          }
-
-          if (
-            where?.contact?.tenantId &&
-            contact.tenantId !== where.contact.tenantId
-          ) {
-            return false;
-          }
-
-          return true;
-        }) ?? null;
+        orders.find((candidate) => matchesOrderWhere(candidate, where)) ?? null;
 
       if (!order) {
         return null;
@@ -385,6 +446,7 @@ export const createCommercePrismaMock = () => {
         return {
           id: order.id,
           contactId: order.contactId,
+          status: order.status,
         };
       }
 
@@ -409,8 +471,7 @@ export const createCommercePrismaMock = () => {
       return order;
     }),
     count: jest.fn(async ({ where }: any = {}) => {
-      const filtered = await prismaMock.order.findMany({ where });
-      return filtered.length;
+      return orders.filter((order) => matchesOrderWhere(order, where)).length;
     }),
   };
 

@@ -1,12 +1,19 @@
-import { Module } from '@nestjs/common';
-import { PrismaModule } from '../../database/prisma/prisma.module';
+﻿import { Module, forwardRef } from '@nestjs/common';
 import { ClickhouseModule } from '../../database/clickhouse/clickhouse.module';
-import { AnalyticsService } from './analytics.service';
+import { PrismaModule } from '../../database/prisma/prisma.module';
+import { CopilotModule } from '../copilot/copilot.module';
+import { ContactsModule } from '../contacts/contacts.module';
 import { AnalyticsController } from './analytics.controller';
 import { AnalyticsCronService } from './analytics-cron.service';
+import { AnalyticsService } from './analytics.service';
 
 @Module({
-  imports: [PrismaModule, ClickhouseModule],
+  imports: [
+    PrismaModule,
+    ClickhouseModule,
+    forwardRef(() => ContactsModule),
+    forwardRef(() => CopilotModule),
+  ],
   controllers: [AnalyticsController],
   providers: [AnalyticsService, AnalyticsCronService],
   exports: [AnalyticsService],
