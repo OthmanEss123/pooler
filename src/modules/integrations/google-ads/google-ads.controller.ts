@@ -15,6 +15,8 @@ import { CurrentTenant } from '../../../common/decorators/current-tenant.decorat
 import { Public } from '../../../common/decorators/public.decorator';
 import { Roles } from '../../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../../common/guards/roles.guard';
+import { CreateAdCampaignDto } from './dto/create-ad-campaign.dto';
+import { CreateAdGroupDto } from './dto/create-ad-group.dto';
 import { ConnectGoogleAdsDto } from './dto/connect-google-ads.dto';
 import { SyncGoogleAdsAudienceDto } from './dto/sync-google-ads-audience.dto';
 import { SyncGoogleAdsMetricsDto } from './dto/sync-google-ads-metrics.dto';
@@ -89,6 +91,41 @@ export class GoogleAdsController {
       body.dateFrom,
       body.dateTo,
     );
+  }
+
+  @Post('campaigns')
+  @UseGuards(RolesGuard)
+  @Roles('OWNER', 'ADMIN')
+  createCampaign(
+    @CurrentTenant() tenantId: string,
+    @Body() body: CreateAdCampaignDto,
+  ) {
+    return this.googleAdsService.createCampaign(tenantId, body);
+  }
+
+  @Post('campaigns/performance-max')
+  @UseGuards(RolesGuard)
+  @Roles('OWNER', 'ADMIN')
+  createPerformanceMaxCampaign(
+    @CurrentTenant() tenantId: string,
+    @Body() body: CreateAdCampaignDto,
+  ) {
+    return this.googleAdsService.createPerformanceMaxCampaign(tenantId, body);
+  }
+
+  @Post('ad-groups')
+  @UseGuards(RolesGuard)
+  @Roles('OWNER', 'ADMIN')
+  createAdGroup(
+    @CurrentTenant() tenantId: string,
+    @Body() body: CreateAdGroupDto,
+  ) {
+    return this.googleAdsService.createAdGroup(tenantId, body);
+  }
+
+  @Get('campaigns/budget-recommendations')
+  getBudgetRecommendations(@CurrentTenant() tenantId: string) {
+    return this.googleAdsService.getBudgetRecommendations(tenantId);
   }
 
   @Get('campaigns')

@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -15,6 +16,12 @@ import { EncryptionService } from '../../../common/services/encryption.service';
 import { ClickhouseService } from '../../../database/clickhouse/clickhouse.service';
 import { PrismaService } from '../../../database/prisma/prisma.service';
 import { SyncQueueService } from '../../../queue/services/sync-queue.service';
+import { GoogleAdsMapper } from './google-ads-mapper';
+import {
+  AdCampaignTypeDto,
+  CreateAdCampaignDto,
+} from './dto/create-ad-campaign.dto';
+import { CreateAdGroupDto } from './dto/create-ad-group.dto';
 
 type GoogleAdsCredentials = {
   refreshToken: string;
@@ -54,6 +61,7 @@ type GoogleAdsRow = {
 
 @Injectable()
 export class GoogleAdsService {
+  private readonly logger = new Logger(GoogleAdsService.name);
   private readonly oauthBaseUrl =
     'https://accounts.google.com/o/oauth2/v2/auth';
   private readonly tokenUrl = 'https://oauth2.googleapis.com/token';
@@ -106,7 +114,7 @@ export class GoogleAdsService {
     );
 
     if (!clientId || !clientSecret || !redirectUri) {
-      throw new BadRequestException('Configuration OAuth incompl�te');
+      throw new BadRequestException('Configuration OAuth incompl?te');
     }
 
     const body = new URLSearchParams({
@@ -134,7 +142,7 @@ export class GoogleAdsService {
 
     if (!tokens.refresh_token) {
       throw new BadRequestException(
-        'Aucun refresh_token re�u. V�rifie prompt=consent et access_type=offline.',
+        'Aucun refresh_token re?u. V?rifie prompt=consent et access_type=offline.',
       );
     }
 
@@ -143,7 +151,7 @@ export class GoogleAdsService {
       tenantId,
       refreshToken: tokens.refresh_token,
       message:
-        'Refresh token r�cup�r�. Le customerId doit �tre fourni s�par�ment pour connecter le compte Google Ads.',
+        'Refresh token r?cup?r?. Le customerId doit ?tre fourni s?par?ment pour connecter le compte Google Ads.',
     };
   }
 
@@ -302,7 +310,7 @@ export class GoogleAdsService {
 
     if (normalizedDateFrom > normalizedDateTo) {
       throw new BadRequestException(
-        'dateFrom doit �tre ant�rieure ou �gale � dateTo',
+        'dateFrom doit ?tre ant?rieure ou ?gale ? dateTo',
       );
     }
 
@@ -692,7 +700,7 @@ export class GoogleAdsService {
     });
 
     if (!integration) {
-      throw new NotFoundException('Int�gration Google Ads introuvable');
+      throw new NotFoundException('Int?gration Google Ads introuvable');
     }
 
     return integration;
@@ -702,7 +710,7 @@ export class GoogleAdsService {
     const integration = await this.getIntegration(tenantId);
 
     if (integration.status !== IntegrationStatus.ACTIVE) {
-      throw new BadRequestException('Int�gration Google Ads inactive');
+      throw new BadRequestException('Int?gration Google Ads inactive');
     }
 
     return integration;
@@ -723,7 +731,7 @@ export class GoogleAdsService {
     const clientSecret = this.configService.get<string>('GOOGLE_CLIENT_SECRET');
 
     if (!clientId || !clientSecret) {
-      throw new BadRequestException('Configuration OAuth incompl�te');
+      throw new BadRequestException('Configuration OAuth incompl?te');
     }
 
     const body = new URLSearchParams({
@@ -744,7 +752,7 @@ export class GoogleAdsService {
     if (!response.ok) {
       const errorText = await response.text();
       throw new BadRequestException(
-        `Impossible de r�cup�rer access_token: ${errorText}`,
+        `Impossible de r?cup?rer access_token: ${errorText}`,
       );
     }
 
@@ -912,5 +920,560 @@ export class GoogleAdsService {
       default:
         return AdCampaignStatus.PAUSED;
     }
+  }
+
+  async createCampaign(tenantId: string, dto: CreateAdCampaignDto) {
+    const { customerId, accessToken } =
+      await this.getTenantGoogleAdsContext(tenantId);
+
+    const budgetResourceName = await this.createBudget(
+      customerId,
+      accessToken,
+      dto.name,
+      dto.budgetDailyMicros,
+    );
+
+    const externalId = await this.createGoogleCampaign(
+      customerId,
+      accessToken,
+      dto,
+      budgetResourceName,
+    );
+
+    if (dto.targetCountry || dto.targetLanguage) {
+      await this.addCampaignCriteria(tenantId, externalId, {
+        countries: dto.targetCountry ? [dto.targetCountry] : undefined,
+        languages: dto.targetLanguage ? [dto.targetLanguage] : undefined,
+      });
+    }
+
+    const campaign = await this.persistCampaign(
+      tenantId,
+      externalId,
+      dto.name,
+      dto.type,
+      dto.budgetDailyMicros,
+    );
+
+    if (dto.audienceSegmentIds?.length) {
+      await this.syncAudiencesToCampaign(
+        tenantId,
+        externalId,
+        dto.audienceSegmentIds,
+      );
+    }
+
+    this.logger.log(
+      `Google Ads campaign created ${externalId} for tenant ${tenantId}`,
+    );
+
+    return campaign;
+  }
+
+  async createPerformanceMaxCampaign(
+    tenantId: string,
+    dto: CreateAdCampaignDto,
+  ) {
+    const { customerId, accessToken } =
+      await this.getTenantGoogleAdsContext(tenantId);
+
+    const budgetResourceName = await this.createBudget(
+      customerId,
+      accessToken,
+      dto.name,
+      dto.budgetDailyMicros,
+    );
+
+    const response = (await this.mutateGoogleAds({
+      accessToken,
+      customerId,
+      mutateOperations: [
+        {
+          campaignOperation: {
+            create: {
+              name: dto.name,
+              status: 'ENABLED',
+              advertisingChannelType: 'PERFORMANCE_MAX',
+              campaignBudget: budgetResourceName,
+              maximizeConversionValue: {},
+            },
+          },
+        },
+      ],
+    })) as {
+      mutateOperationResponses?: Array<{
+        campaignResult?: { resourceName?: string };
+      }>;
+    };
+
+    const resourceName =
+      response.mutateOperationResponses?.[0]?.campaignResult?.resourceName;
+
+    if (!resourceName) {
+      throw new BadRequestException(
+        'Google Ads performance max creation returned no resource name',
+      );
+    }
+
+    const externalId = GoogleAdsMapper.extractId(resourceName);
+
+    if (dto.targetCountry || dto.targetLanguage) {
+      await this.addCampaignCriteria(tenantId, externalId, {
+        countries: dto.targetCountry ? [dto.targetCountry] : undefined,
+        languages: dto.targetLanguage ? [dto.targetLanguage] : undefined,
+      });
+    }
+
+    const campaign = await this.persistCampaign(
+      tenantId,
+      externalId,
+      dto.name,
+      AdCampaignTypeDto.PERFORMANCE_MAX,
+      dto.budgetDailyMicros,
+    );
+
+    if (dto.audienceSegmentIds?.length) {
+      await this.syncAudiencesToCampaign(
+        tenantId,
+        externalId,
+        dto.audienceSegmentIds,
+      );
+    }
+
+    return campaign;
+  }
+
+  async createAdGroup(tenantId: string, dto: CreateAdGroupDto) {
+    const { customerId, accessToken } =
+      await this.getTenantGoogleAdsContext(tenantId);
+
+    const campaignResourceName = this.buildCampaignResourceName(
+      customerId,
+      dto.campaignExternalId,
+    );
+
+    const response = (await this.mutateGoogleAds({
+      accessToken,
+      customerId,
+      mutateOperations: [
+        {
+          adGroupOperation: {
+            create: {
+              name: dto.name,
+              campaign: campaignResourceName,
+              status: 'ENABLED',
+              cpcBidMicros: String(dto.cpcBidMicros ?? 1_000_000),
+              type: 'SEARCH_STANDARD',
+            },
+          },
+        },
+      ],
+    })) as {
+      mutateOperationResponses?: Array<{
+        adGroupResult?: { resourceName?: string };
+      }>;
+    };
+
+    const adGroupResourceName =
+      response.mutateOperationResponses?.[0]?.adGroupResult?.resourceName;
+
+    if (!adGroupResourceName) {
+      throw new BadRequestException(
+        'Google Ads ad group creation returned no resource name',
+      );
+    }
+
+    if (dto.keywords?.length) {
+      await this.addKeywords(
+        customerId,
+        accessToken,
+        adGroupResourceName,
+        dto.keywords,
+      );
+    }
+
+    if (dto.headline1 && dto.finalUrl) {
+      await this.createResponsiveSearchAd(
+        customerId,
+        accessToken,
+        adGroupResourceName,
+        dto,
+      );
+    }
+
+    return { adGroupResourceName };
+  }
+
+  async getBudgetRecommendations(tenantId: string) {
+    const campaigns = await this.prisma.adCampaign.findMany({
+      where: { tenantId, status: AdCampaignStatus.ENABLED },
+    });
+
+    return campaigns
+      .filter((campaign) => campaign.roas !== null)
+      .map((campaign) => {
+        const roas = Number(campaign.roas ?? 0);
+        const spend = Number(campaign.spend ?? 0);
+        const currentBudget = Number(campaign.budgetDaily ?? 0);
+
+        if (roas > 4) {
+          return {
+            campaignId: campaign.id,
+            campaignName: campaign.name,
+            currentBudget,
+            roas,
+            recommendation: 'increase' as const,
+            suggestedBudget: currentBudget * 1.5,
+            reason: `ROAS ${roas.toFixed(2)} is excellent. Increase budget by 50%.`,
+          };
+        }
+
+        if (roas < 1 && spend > 50) {
+          return {
+            campaignId: campaign.id,
+            campaignName: campaign.name,
+            currentBudget,
+            roas,
+            recommendation: 'decrease' as const,
+            suggestedBudget: currentBudget * 0.5,
+            reason: `ROAS ${roas.toFixed(2)} is low. Reduce budget or pause campaign.`,
+          };
+        }
+
+        return null;
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
+  }
+
+  async addCampaignCriteria(
+    tenantId: string,
+    externalId: string,
+    criteria: {
+      countries?: string[];
+      languages?: string[];
+    },
+  ) {
+    const { customerId, accessToken } =
+      await this.getTenantGoogleAdsContext(tenantId);
+
+    const campaignResourceName = this.buildCampaignResourceName(
+      customerId,
+      externalId,
+    );
+
+    const mutateOperations: unknown[] = [];
+
+    for (const country of criteria.countries ?? []) {
+      const geoTargetId = this.getGeoTargetId(country);
+
+      if (!geoTargetId) {
+        continue;
+      }
+
+      mutateOperations.push({
+        campaignCriterionOperation: {
+          create: {
+            campaign: campaignResourceName,
+            location: {
+              geoTargetConstant: `geoTargetConstants/${geoTargetId}`,
+            },
+          },
+        },
+      });
+    }
+
+    for (const language of criteria.languages ?? []) {
+      const languageId = this.getLanguageId(language);
+
+      if (!languageId) {
+        continue;
+      }
+
+      mutateOperations.push({
+        campaignCriterionOperation: {
+          create: {
+            campaign: campaignResourceName,
+            language: {
+              languageConstant: `languageConstants/${languageId}`,
+            },
+          },
+        },
+      });
+    }
+
+    if (mutateOperations.length === 0) {
+      return { criteriaAdded: 0 };
+    }
+
+    await this.mutateGoogleAds({
+      accessToken,
+      customerId,
+      mutateOperations,
+    });
+
+    await this.prisma.adCampaign.updateMany({
+      where: { tenantId, externalId },
+      data: { syncedAt: new Date() },
+    });
+
+    return { criteriaAdded: mutateOperations.length };
+  }
+
+  private async createBudget(
+    customerId: string,
+    accessToken: string,
+    name: string,
+    amountMicros: number,
+  ) {
+    const response = (await this.mutateGoogleAds({
+      accessToken,
+      customerId,
+      mutateOperations: [
+        {
+          campaignBudgetOperation: {
+            create: {
+              name: `Budget - ${name}`,
+              amountMicros: String(amountMicros),
+              deliveryMethod: 'STANDARD',
+              explicitlyShared: false,
+            },
+          },
+        },
+      ],
+    })) as {
+      mutateOperationResponses?: Array<{
+        campaignBudgetResult?: { resourceName?: string };
+      }>;
+    };
+
+    const resourceName =
+      response.mutateOperationResponses?.[0]?.campaignBudgetResult
+        ?.resourceName;
+
+    if (!resourceName) {
+      throw new BadRequestException(
+        'Google Ads budget creation returned no resource name',
+      );
+    }
+
+    return resourceName;
+  }
+
+  private async createGoogleCampaign(
+    customerId: string,
+    accessToken: string,
+    dto: CreateAdCampaignDto,
+    budgetResourceName: string,
+  ) {
+    const advertisingChannelType = this.mapTypeToChannel(dto.type);
+    const createBody: Record<string, unknown> = {
+      name: dto.name,
+      status: 'ENABLED',
+      advertisingChannelType,
+      campaignBudget: budgetResourceName,
+      targetSpend: {},
+    };
+
+    if (
+      advertisingChannelType === 'SEARCH' ||
+      advertisingChannelType === 'DISPLAY'
+    ) {
+      createBody.networkSettings = {
+        targetGoogleSearch: true,
+        targetSearchNetwork: true,
+        targetContentNetwork: advertisingChannelType === 'DISPLAY',
+        targetPartnerSearchNetwork: false,
+      };
+    }
+
+    const response = (await this.mutateGoogleAds({
+      accessToken,
+      customerId,
+      mutateOperations: [
+        {
+          campaignOperation: {
+            create: createBody,
+          },
+        },
+      ],
+    })) as {
+      mutateOperationResponses?: Array<{
+        campaignResult?: { resourceName?: string };
+      }>;
+    };
+
+    const resourceName =
+      response.mutateOperationResponses?.[0]?.campaignResult?.resourceName;
+
+    if (!resourceName) {
+      throw new BadRequestException(
+        'Google Ads campaign creation returned no resource name',
+      );
+    }
+
+    return GoogleAdsMapper.extractId(resourceName);
+  }
+
+  private async addKeywords(
+    customerId: string,
+    accessToken: string,
+    adGroupResourceName: string,
+    keywords: string[],
+  ) {
+    const mutateOperations = keywords.map((keyword) => ({
+      adGroupCriterionOperation: {
+        create: {
+          adGroup: adGroupResourceName,
+          status: 'ENABLED',
+          keyword: {
+            text: keyword,
+            matchType: 'BROAD',
+          },
+        },
+      },
+    }));
+
+    await this.mutateGoogleAds({
+      accessToken,
+      customerId,
+      mutateOperations,
+    });
+  }
+
+  private async createResponsiveSearchAd(
+    customerId: string,
+    accessToken: string,
+    adGroupResourceName: string,
+    dto: CreateAdGroupDto,
+  ) {
+    const headlines = [
+      dto.headline1,
+      dto.headline2 ?? dto.headline1,
+      dto.headline1 ? `Discover ${dto.headline1}` : undefined,
+    ]
+      .filter((value): value is string => Boolean(value))
+      .map((text) => ({ text }));
+
+    const descriptions = [
+      dto.description ?? 'Discover our offer.',
+      'See our latest offers today.',
+    ].map((text) => ({ text }));
+
+    await this.mutateGoogleAds({
+      accessToken,
+      customerId,
+      mutateOperations: [
+        {
+          adGroupAdOperation: {
+            create: {
+              adGroup: adGroupResourceName,
+              status: 'ENABLED',
+              ad: {
+                responsiveSearchAd: {
+                  headlines,
+                  descriptions,
+                },
+                finalUrls: dto.finalUrl ? [dto.finalUrl] : [],
+              },
+            },
+          },
+        },
+      ],
+    });
+  }
+
+  private async syncAudiencesToCampaign(
+    tenantId: string,
+    campaignExternalId: string,
+    segmentIds: string[],
+  ) {
+    for (const segmentId of segmentIds) {
+      const result = await this.syncAudienceFromSegment(
+        tenantId,
+        segmentId,
+        `Audience Pilot - ${segmentId}`,
+      );
+
+      this.logger.log(
+        `Audience ${result.audienceId} synchronized for campaign ${campaignExternalId}`,
+      );
+    }
+  }
+
+  private async getTenantGoogleAdsContext(tenantId: string) {
+    const integration = await this.getActiveIntegration(tenantId);
+    const credentials = this.getDecryptedCredentials(integration.credentials);
+    const accessToken = await this.getAccessToken(credentials.refreshToken);
+
+    return {
+      customerId: credentials.customerId,
+      accessToken,
+    };
+  }
+
+  private async persistCampaign(
+    tenantId: string,
+    externalId: string,
+    name: string,
+    type: AdCampaignTypeDto,
+    budgetDailyMicros: number,
+  ) {
+    return this.prisma.adCampaign.create({
+      data: {
+        tenantId,
+        externalId,
+        name,
+        type: type as unknown as AdCampaignType,
+        status: AdCampaignStatus.ENABLED,
+        budgetDaily: new Prisma.Decimal(budgetDailyMicros / 1_000_000),
+      },
+    });
+  }
+
+  private mapTypeToChannel(type: AdCampaignTypeDto) {
+    switch (type) {
+      case AdCampaignTypeDto.SEARCH:
+        return 'SEARCH';
+      case AdCampaignTypeDto.SHOPPING:
+        return 'SHOPPING';
+      case AdCampaignTypeDto.PERFORMANCE_MAX:
+        return 'PERFORMANCE_MAX';
+      case AdCampaignTypeDto.DISPLAY:
+        return 'DISPLAY';
+      case AdCampaignTypeDto.VIDEO:
+        return 'VIDEO';
+      default:
+        return 'SEARCH';
+    }
+  }
+
+  private getGeoTargetId(countryCode: string) {
+    const mapping: Record<string, number> = {
+      FR: 2250,
+      BE: 2056,
+      CH: 2756,
+      DE: 2276,
+      ES: 2724,
+      IT: 2380,
+      GB: 2826,
+      US: 2840,
+      CA: 2124,
+    };
+
+    return mapping[countryCode.toUpperCase()] ?? null;
+  }
+
+  private getLanguageId(language: string) {
+    const mapping: Record<string, number> = {
+      en: 1000,
+      de: 1001,
+      fr: 1002,
+      es: 1003,
+      it: 1004,
+      nl: 1010,
+      pt: 1014,
+    };
+
+    return mapping[language.toLowerCase()] ?? null;
   }
 }

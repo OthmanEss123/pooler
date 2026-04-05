@@ -16,6 +16,7 @@ export class ShopifyOAuthService {
   ) {}
 
   async getOAuthUrl(shop: string, tenantId: string) {
+    const normalizedShop = this.normalizeShop(shop);
     const nonce = randomBytes(16).toString('hex');
     const scopes = [
       'read_orders',
@@ -28,15 +29,15 @@ export class ShopifyOAuthService {
     const redirectUri = this.config.getOrThrow<string>('SHOPIFY_REDIRECT_URI');
     const apiKey = this.config.getOrThrow<string>('SHOPIFY_API_KEY');
 
-    // Stocker nonce → tenantId + shop (usage unique)
+    // Stocke un nonce a usage unique avec le tenant et la boutique attendue.
     await this.redis.set(
       `shopify:oauth:${nonce}`,
-      JSON.stringify({ tenantId, shop }),
+      JSON.stringify({ tenantId, shop: normalizedShop }),
       this.NONCE_TTL,
     );
 
     const url =
-      `https://${shop}/admin/oauth/authorize` +
+      `https://${normalizedShop}/admin/oauth/authorize` +
       `?client_id=${apiKey}` +
       `&scope=${scopes}` +
       `&redirect_uri=${encodeURIComponent(redirectUri)}` +
@@ -46,24 +47,27 @@ export class ShopifyOAuthService {
   }
 
   async handleCallback(shop: string, code: string, state: string) {
-    // Lire et supprimer nonce (usage unique)
+    const normalizedShop = this.normalizeShop(shop);
     const stored = await this.redis.get(`shopify:oauth:${state}`);
+
     if (!stored) {
       throw new BadRequestException('State invalide ou expire');
     }
 
     await this.redis.del(`shopify:oauth:${state}`);
-    const { tenantId } = JSON.parse(stored) as {
+    const { tenantId, shop: expectedShop } = JSON.parse(stored) as {
       tenantId: string;
       shop: string;
     };
 
-    // Échanger code → access token
-    const accessToken = await this.exchangeCode(shop, code);
+    if (expectedShop !== normalizedShop) {
+      throw new BadRequestException('Shop OAuth invalide');
+    }
 
-    // Connecter + lancer sync initiale
-    await this.shopify.connect(tenantId, shop, accessToken);
-    return { connected: true, shop, tenantId };
+    const accessToken = await this.exchangeCode(normalizedShop, code);
+
+    await this.shopify.connect(tenantId, normalizedShop, accessToken);
+    return { connected: true, shop: normalizedShop, tenantId };
   }
 
   private async exchangeCode(shop: string, code: string) {
@@ -86,5 +90,19 @@ export class ShopifyOAuthService {
 
     const data = (await res.json()) as { access_token: string };
     return data.access_token;
+  }
+
+  private normalizeShop(shop: string) {
+    const normalizedShop = shop.trim().toLowerCase();
+    const isValidShop = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(
+      normalizedShop,
+    );
+
+    if (!isValidShop) {
+      this.logger.warn(`Boutique Shopify invalide recue: ${shop}`);
+      throw new BadRequestException('Shop Shopify invalide');
+    }
+
+    return normalizedShop;
   }
 }

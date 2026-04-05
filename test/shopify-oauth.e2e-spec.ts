@@ -94,6 +94,14 @@ describe('Shopify OAuth (e2e)', () => {
         .expect(400);
     });
 
+    it('400 - shop invalide', async () => {
+      await request(app.getHttpServer())
+        .get('/api/v1/integrations/shopify/oauth/url')
+        .set('Cookie', cookies)
+        .query({ shop: 'https://evil.example.com' })
+        .expect(400);
+    });
+
     it('401 - sans token', async () => {
       await request(app.getHttpServer())
         .get('/api/v1/integrations/shopify/oauth/url')
@@ -110,6 +118,27 @@ describe('Shopify OAuth (e2e)', () => {
           shop: 'test-store.myshopify.com',
           code: 'fake_code',
           state: 'invalid_state_not_in_redis',
+        })
+        .expect(400);
+    });
+
+    it('400 - shop ne correspond pas au state stocke', async () => {
+      const oauthUrlResponse = await request(app.getHttpServer())
+        .get('/api/v1/integrations/shopify/oauth/url')
+        .set('Cookie', cookies)
+        .query({ shop: 'test-store.myshopify.com' })
+        .expect(200);
+
+      const state = new URL(
+        oauthUrlResponse.body.url as string,
+      ).searchParams.get('state');
+
+      await request(app.getHttpServer())
+        .get('/api/v1/integrations/shopify/oauth/callback')
+        .query({
+          shop: 'other-store.myshopify.com',
+          code: 'fake_code',
+          state,
         })
         .expect(400);
     });
