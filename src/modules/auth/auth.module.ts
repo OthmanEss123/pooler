@@ -4,6 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import type { StringValue } from 'ms';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { EmailProviderModule } from '../email-provider/email-provider.module';
 import { AuthController } from './auth.controller';
 import { AuthCronService } from './auth-cron.service';
 import { AuthService } from './auth.service';
@@ -13,6 +14,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 @Module({
   imports: [
     ConfigModule,
+    EmailProviderModule,
     PassportModule.register({
       defaultStrategy: 'jwt',
     }),

@@ -37,6 +37,7 @@ type GoogleAdsRow = {
     advertisingChannelType?: string;
   };
   campaignBudget?: {
+    resourceName?: string;
     amountMicros?: string | number;
   };
   metrics?: {
@@ -492,6 +493,192 @@ export class GoogleAdsService {
     }
 
     return campaign;
+  }
+
+  async pauseCampaign(tenantId: string, id: string) {
+    return this.updateCampaignStatus(
+      tenantId,
+      id,
+      'PAUSED',
+      AdCampaignStatus.PAUSED,
+    );
+  }
+
+  async enableCampaign(tenantId: string, id: string) {
+    return this.updateCampaignStatus(
+      tenantId,
+      id,
+      'ENABLED',
+      AdCampaignStatus.ENABLED,
+    );
+  }
+
+  async updateBudget(tenantId: string, id: string, budgetMicros: number) {
+    const { campaign, accessToken, customerId } =
+      await this.getCampaignMutationContext(tenantId, id);
+    const budgetResourceName = await this.getCampaignBudgetResourceName(
+      accessToken,
+      customerId,
+      campaign.externalId,
+    );
+
+    await this.mutateGoogleAds({
+      accessToken,
+      customerId,
+      mutateOperations: [
+        {
+          campaignBudgetOperation: {
+            updateMask: 'amount_micros',
+            update: {
+              resourceName: budgetResourceName,
+              amountMicros: String(budgetMicros),
+            },
+          },
+        },
+      ],
+    });
+
+    const budgetDaily = new Prisma.Decimal(budgetMicros / 1_000_000);
+
+    await this.prisma.adCampaign.update({
+      where: { id: campaign.id },
+      data: { budgetDaily },
+    });
+
+    return {
+      success: true,
+      id: campaign.id,
+      budgetDaily,
+    };
+  }
+
+  private async updateCampaignStatus(
+    tenantId: string,
+    id: string,
+    googleStatus: 'PAUSED' | 'ENABLED',
+    status: AdCampaignStatus,
+  ) {
+    const { campaign, accessToken, customerId } =
+      await this.getCampaignMutationContext(tenantId, id);
+
+    await this.mutateGoogleAds({
+      accessToken,
+      customerId,
+      mutateOperations: [
+        {
+          campaignOperation: {
+            updateMask: 'status',
+            update: {
+              resourceName: this.buildCampaignResourceName(
+                customerId,
+                campaign.externalId,
+              ),
+              status: googleStatus,
+            },
+          },
+        },
+      ],
+    });
+
+    await this.prisma.adCampaign.update({
+      where: { id: campaign.id },
+      data: { status },
+    });
+
+    return {
+      success: true,
+      id: campaign.id,
+      status,
+    };
+  }
+
+  private async getCampaignMutationContext(tenantId: string, id: string) {
+    const campaign = await this.getCampaignById(tenantId, id);
+    const integration = await this.getActiveIntegration(tenantId);
+    const credentials = this.getDecryptedCredentials(integration.credentials);
+    const accessToken = await this.getAccessToken(credentials.refreshToken);
+
+    return {
+      campaign,
+      accessToken,
+      customerId: credentials.customerId,
+    };
+  }
+
+  private async getCampaignBudgetResourceName(
+    accessToken: string,
+    customerId: string,
+    campaignExternalId: string,
+  ) {
+    const rows = await this.searchStream({
+      accessToken,
+      customerId,
+      query: `
+        SELECT
+          campaign.id,
+          campaign_budget.resource_name,
+          campaign_budget.amount_micros
+        FROM campaign
+        WHERE campaign.id = ${campaignExternalId}
+      `,
+    });
+
+    const resourceName = rows[0]?.campaignBudget?.resourceName;
+
+    if (!resourceName) {
+      throw new BadRequestException(
+        'Budget Google Ads introuvable pour cette campagne',
+      );
+    }
+
+    return resourceName;
+  }
+
+  private buildCampaignResourceName(customerId: string, externalId: string) {
+    return `customers/${customerId}/campaigns/${externalId}`;
+  }
+
+  private async mutateGoogleAds(params: {
+    accessToken: string;
+    customerId: string;
+    mutateOperations: unknown[];
+  }) {
+    const developerToken = this.configService.get<string>(
+      'GOOGLE_ADS_DEVELOPER_TOKEN',
+    );
+    const loginCustomerId = this.configService.get<string>(
+      'GOOGLE_ADS_LOGIN_CUSTOMER_ID',
+    );
+    const apiVersion =
+      this.configService.get<string>('GOOGLE_ADS_API_VERSION') || 'v22';
+
+    if (!developerToken) {
+      throw new BadRequestException('GOOGLE_ADS_DEVELOPER_TOKEN manquant');
+    }
+
+    const response = await fetch(
+      `https://googleads.googleapis.com/${apiVersion}/customers/${params.customerId}/googleAds:mutate`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${params.accessToken}`,
+          'Content-Type': 'application/json',
+          'developer-token': developerToken,
+          ...(loginCustomerId ? { 'login-customer-id': loginCustomerId } : {}),
+        },
+        body: JSON.stringify({
+          mutateOperations: params.mutateOperations,
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new BadRequestException(`Google Ads mutate failed: ${errorText}`);
+    }
+
+    const data: unknown = await response.json();
+    return data;
   }
 
   private async getIntegration(tenantId: string) {

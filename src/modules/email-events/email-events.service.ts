@@ -1,5 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { EmailEventType, Prisma } from '@prisma/client';
+import { EmailEventType, Prisma, SuppressionReason } from '@prisma/client';
 import { ClickhouseService } from '../../database/clickhouse/clickhouse.service';
 import { PrismaService } from '../../database/prisma/prisma.service';
 import { TrackEmailEventDto } from './dto/track-email-event.dto';
@@ -138,7 +138,11 @@ export class EmailEventsService {
       if (dto.type === EmailEventType.UNSUBSCRIBED) {
         await tx.contact.update({
           where: { id: dto.contactId },
-          data: { emailStatus: 'UNSUBSCRIBED' },
+          data: {
+            emailStatus: 'UNSUBSCRIBED',
+            subscribed: false,
+            unsubscribedAt: new Date(),
+          },
         });
       }
 
@@ -164,6 +168,32 @@ export class EmailEventsService {
 
       return createdEmailEvent;
     });
+
+    if (contact.email) {
+      if (dto.type === EmailEventType.UNSUBSCRIBED) {
+        await this.syncSuppression(
+          campaign.tenantId,
+          contact.email,
+          SuppressionReason.UNSUBSCRIBED,
+        );
+      }
+
+      if (dto.type === EmailEventType.BOUNCED) {
+        await this.syncSuppression(
+          campaign.tenantId,
+          contact.email,
+          SuppressionReason.BOUNCED,
+        );
+      }
+
+      if (dto.type === EmailEventType.COMPLAINED) {
+        await this.syncSuppression(
+          campaign.tenantId,
+          contact.email,
+          SuppressionReason.COMPLAINED,
+        );
+      }
+    }
 
     const revenue =
       dto.revenue ?? getMetadataNumber(dto.metadata, 'revenue') ?? 0;
@@ -225,6 +255,27 @@ export class EmailEventsService {
       },
       include: {
         contact: true,
+      },
+    });
+  }
+
+  private async syncSuppression(
+    tenantId: string,
+    email: string,
+    reason: SuppressionReason,
+  ) {
+    await this.prisma.globalSuppression.upsert({
+      where: {
+        tenantId_email: {
+          tenantId,
+          email: email.trim().toLowerCase(),
+        },
+      },
+      update: { reason },
+      create: {
+        tenantId,
+        email: email.trim().toLowerCase(),
+        reason,
       },
     });
   }

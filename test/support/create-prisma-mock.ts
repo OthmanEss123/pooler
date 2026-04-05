@@ -1,7 +1,10 @@
 /* eslint-disable @typescript-eslint/require-await, @typescript-eslint/no-unnecessary-type-assertion */
 import {
   ApiKeyScope,
+  BillingPlan,
+  BillingSubscriptionStatus,
   EmailStatus,
+  InsightType,
   SegmentType,
   UserRole,
 } from '@prisma/client';
@@ -12,6 +15,8 @@ export interface MockTenant {
   name: string;
   slug: string;
   isActive: boolean;
+  plan: BillingPlan;
+  planStatus: BillingSubscriptionStatus;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -125,6 +130,31 @@ export interface MockAdAudienceMember {
   addedAt: Date;
 }
 
+export interface MockBillingSubscription {
+  id: string;
+  tenantId: string;
+  plan: BillingPlan;
+  status: BillingSubscriptionStatus;
+  stripeCustomerId: string | null;
+  stripeSubscriptionId: string | null;
+  stripePriceId: string | null;
+  currentPeriodStart: Date | null;
+  currentPeriodEnd: Date | null;
+  cancelAtPeriodEnd: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface MockInsight {
+  id: string;
+  tenantId: string;
+  type: InsightType;
+  title: string;
+  description: string | null;
+  data: unknown;
+  isRead: boolean;
+  createdAt: Date;
+}
 type SelectMap = Record<string, boolean | { select: SelectMap }>;
 
 type ComparableValue = number | Date | null;
@@ -317,6 +347,8 @@ export const createPrismaMock = () => {
   const segmentMembers: MockSegmentMember[] = [];
   const adAudiences: MockAdAudience[] = [];
   const adAudienceMembers: MockAdAudienceMember[] = [];
+  const billingSubscriptions: MockBillingSubscription[] = [];
+  const insights: MockInsight[] = [];
 
   let tenantCounter = 1;
   let userCounter = 1;
@@ -326,6 +358,8 @@ export const createPrismaMock = () => {
   let contactCounter = 1;
   let segmentCounter = 1;
   let adAudienceCounter = 1;
+  let billingSubscriptionCounter = 1;
+  let insightCounter = 1;
 
   const seedContactsForTenant = (tenantId: string) => {
     const now = new Date();
@@ -398,11 +432,27 @@ export const createPrismaMock = () => {
             name: data.name,
             slug: data.slug,
             isActive: true,
+            plan: BillingPlan.STARTER,
+            planStatus: BillingSubscriptionStatus.ACTIVE,
             createdAt: now,
             updatedAt: now,
           };
 
           tenants.push(tenant);
+          billingSubscriptions.push({
+            id: `billing-subscription-${billingSubscriptionCounter++}`,
+            tenantId: tenant.id,
+            plan: BillingPlan.STARTER,
+            status: BillingSubscriptionStatus.ACTIVE,
+            stripeCustomerId: null,
+            stripeSubscriptionId: null,
+            stripePriceId: null,
+            currentPeriodStart: null,
+            currentPeriodEnd: null,
+            cancelAtPeriodEnd: false,
+            createdAt: now,
+            updatedAt: now,
+          });
           seedContactsForTenant(tenant.id);
           return tenant;
         },
@@ -515,29 +565,51 @@ export const createPrismaMock = () => {
       findUnique: jest.fn(
         async ({
           where,
+          include,
         }: {
           where: {
             id?: string;
             tenantId_userId?: { tenantId: string; userId: string };
           };
+          include?: { tenant?: boolean | { select?: SelectMap } };
         }) => {
-          if (where.id) {
-            return (
-              memberships.find((candidate) => candidate.id === where.id) ?? null
-            );
+          const membership = where.id
+            ? (memberships.find((candidate) => candidate.id === where.id) ??
+              null)
+            : where.tenantId_userId
+              ? (memberships.find(
+                  (candidate) =>
+                    candidate.tenantId === where.tenantId_userId?.tenantId &&
+                    candidate.userId === where.tenantId_userId?.userId,
+                ) ?? null)
+              : null;
+
+          if (!membership) {
+            return null;
           }
 
-          if (where.tenantId_userId) {
-            return (
-              memberships.find(
-                (candidate) =>
-                  candidate.tenantId === where.tenantId_userId?.tenantId &&
-                  candidate.userId === where.tenantId_userId?.userId,
-              ) ?? null
-            );
+          if (!include?.tenant) {
+            return membership;
           }
 
-          return null;
+          const tenant =
+            tenants.find((candidate) => candidate.id === membership.tenantId) ??
+            null;
+
+          if (include.tenant === true) {
+            return { ...membership, tenant };
+          }
+
+          return {
+            ...membership,
+            tenant:
+              tenant && include.tenant.select
+                ? pickSelected(
+                    tenant as Record<string, unknown>,
+                    include.tenant.select,
+                  )
+                : tenant,
+          };
         },
       ),
       findMany: jest.fn(
@@ -985,6 +1057,243 @@ export const createPrismaMock = () => {
           }
 
           return { count };
+        },
+      ),
+    },
+    billingSubscription: {
+      findUnique: jest.fn(
+        async ({
+          where,
+        }: {
+          where: {
+            tenantId?: string;
+            stripeCustomerId?: string;
+            stripeSubscriptionId?: string;
+          };
+        }) => {
+          return (
+            billingSubscriptions.find((candidate) => {
+              if (where.tenantId && candidate.tenantId === where.tenantId) {
+                return true;
+              }
+
+              if (
+                where.stripeCustomerId &&
+                candidate.stripeCustomerId === where.stripeCustomerId
+              ) {
+                return true;
+              }
+
+              if (
+                where.stripeSubscriptionId &&
+                candidate.stripeSubscriptionId === where.stripeSubscriptionId
+              ) {
+                return true;
+              }
+
+              return false;
+            }) ?? null
+          );
+        },
+      ),
+      findFirst: jest.fn(
+        async ({ where }: { where?: Record<string, unknown> }) => {
+          return (
+            billingSubscriptions.find((candidate) => {
+              if (!where) {
+                return true;
+              }
+
+              if (
+                Array.isArray(where.OR) &&
+                (where.OR as Record<string, unknown>[]).some((item) => {
+                  if (item.tenantId && candidate.tenantId !== item.tenantId) {
+                    return false;
+                  }
+
+                  if (
+                    item.stripeCustomerId &&
+                    candidate.stripeCustomerId !== item.stripeCustomerId
+                  ) {
+                    return false;
+                  }
+
+                  if (
+                    item.stripeSubscriptionId &&
+                    candidate.stripeSubscriptionId !== item.stripeSubscriptionId
+                  ) {
+                    return false;
+                  }
+
+                  return true;
+                })
+              ) {
+                return true;
+              }
+
+              if (where.tenantId && candidate.tenantId !== where.tenantId) {
+                return false;
+              }
+
+              if (
+                where.stripeCustomerId &&
+                candidate.stripeCustomerId !== where.stripeCustomerId
+              ) {
+                return false;
+              }
+
+              if (
+                where.stripeSubscriptionId &&
+                candidate.stripeSubscriptionId !== where.stripeSubscriptionId
+              ) {
+                return false;
+              }
+
+              return true;
+            }) ?? null
+          );
+        },
+      ),
+      upsert: jest.fn(
+        async ({
+          where,
+          update,
+          create,
+        }: {
+          where: { tenantId: string };
+          update: Partial<MockBillingSubscription>;
+          create: Partial<MockBillingSubscription> & { tenantId: string };
+        }) => {
+          const existing = billingSubscriptions.find(
+            (candidate) => candidate.tenantId === where.tenantId,
+          );
+
+          if (existing) {
+            Object.assign(existing, update, { updatedAt: new Date() });
+            return existing;
+          }
+
+          const now = new Date();
+          const subscription: MockBillingSubscription = {
+            id: `billing-subscription-${billingSubscriptionCounter++}`,
+            tenantId: create.tenantId,
+            plan: create.plan ?? BillingPlan.STARTER,
+            status: create.status ?? BillingSubscriptionStatus.ACTIVE,
+            stripeCustomerId: create.stripeCustomerId ?? null,
+            stripeSubscriptionId: create.stripeSubscriptionId ?? null,
+            stripePriceId: create.stripePriceId ?? null,
+            currentPeriodStart: create.currentPeriodStart ?? null,
+            currentPeriodEnd: create.currentPeriodEnd ?? null,
+            cancelAtPeriodEnd: create.cancelAtPeriodEnd ?? false,
+            createdAt: now,
+            updatedAt: now,
+          };
+
+          billingSubscriptions.push(subscription);
+          return subscription;
+        },
+      ),
+      update: jest.fn(
+        async ({
+          where,
+          data,
+        }: {
+          where: { tenantId?: string; id?: string };
+          data: Partial<MockBillingSubscription>;
+        }) => {
+          const subscription = billingSubscriptions.find(
+            (candidate) =>
+              (where.id && candidate.id === where.id) ||
+              (where.tenantId && candidate.tenantId === where.tenantId),
+          );
+
+          if (!subscription) {
+            throw new Error('Billing subscription not found');
+          }
+
+          Object.assign(subscription, data, { updatedAt: new Date() });
+          return subscription;
+        },
+      ),
+    },
+    emailEvent: {
+      count: jest.fn(async () => 0),
+    },
+    insight: {
+      findFirst: jest.fn(
+        async ({ where }: { where?: Record<string, unknown> }) => {
+          return (
+            insights.find((candidate) => {
+              if (!where) {
+                return true;
+              }
+
+              if (where.tenantId && candidate.tenantId !== where.tenantId) {
+                return false;
+              }
+
+              if (where.type && candidate.type !== where.type) {
+                return false;
+              }
+
+              if (where.title && candidate.title !== where.title) {
+                return false;
+              }
+
+              if (
+                where.createdAt &&
+                typeof where.createdAt === 'object' &&
+                'gte' in (where.createdAt as Record<string, unknown>)
+              ) {
+                const gte = (where.createdAt as { gte: Date }).gte;
+                if (candidate.createdAt < gte) {
+                  return false;
+                }
+              }
+
+              return true;
+            }) ?? null
+          );
+        },
+      ),
+      create: jest.fn(
+        async ({
+          data,
+        }: {
+          data: Partial<MockInsight> & {
+            tenantId: string;
+            type: InsightType;
+            title: string;
+          };
+        }) => {
+          const insight: MockInsight = {
+            id: `insight-${insightCounter++}`,
+            tenantId: data.tenantId,
+            type: data.type,
+            title: data.title,
+            description: (data.description as string | undefined) ?? null,
+            data: data.data ?? null,
+            isRead: false,
+            createdAt: new Date(),
+          };
+
+          insights.push(insight);
+          return insight;
+        },
+      ),
+      count: jest.fn(
+        async ({ where }: { where?: Record<string, unknown> } = {}) => {
+          return insights.filter((candidate) => {
+            if (where?.tenantId && candidate.tenantId !== where.tenantId) {
+              return false;
+            }
+
+            if (where?.isRead === false && candidate.isRead !== false) {
+              return false;
+            }
+
+            return true;
+          }).length;
         },
       ),
     },

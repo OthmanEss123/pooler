@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import {
   BadRequestException,
   Injectable,
@@ -13,6 +14,8 @@ import {
   FlowTriggerType,
 } from './dto/create-flow.dto';
 import { UpdateFlowDto } from './dto/update-flow.dto';
+
+const FLOW_EXECUTION_MAX_DURATION_HOURS = 24;
 
 const toInputJsonValue = (value: unknown): Prisma.InputJsonValue =>
   JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
@@ -289,21 +292,69 @@ export class FlowsService {
       throw new NotFoundException('Contact introuvable');
     }
 
-    const execution = await this.prisma.flowExecution.create({
-      data: {
+    const now = new Date();
+    const triggerRef = this.buildTriggerRef(flowId, contactId, now);
+
+    const existingExecution = await this.prisma.flowExecution.findFirst({
+      where: {
         tenantId,
         flowId,
         contactId,
-        status: FlowExecutionStatus.RUNNING,
-        currentStepIndex: 0,
+        triggerRef,
       },
     });
 
-    await this.flowQueueService.triggerExecution(execution.id);
+    if (existingExecution) {
+      return {
+        executionId: existingExecution.id,
+        duplicated: true,
+      };
+    }
 
-    return {
-      executionId: execution.id,
-    };
+    try {
+      const execution = await this.prisma.flowExecution.create({
+        data: {
+          tenantId,
+          flowId,
+          contactId,
+          triggerRef,
+          status: FlowExecutionStatus.RUNNING,
+          currentStepIndex: 0,
+          timeoutAt: this.resolveTimeoutAt(now),
+          lastHeartbeat: now,
+        },
+      });
+
+      await this.flowQueueService.triggerExecution(execution.id);
+
+      return {
+        executionId: execution.id,
+        duplicated: false,
+      };
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const duplicateExecution = await this.prisma.flowExecution.findFirst({
+          where: {
+            tenantId,
+            flowId,
+            contactId,
+            triggerRef,
+          },
+        });
+
+        if (duplicateExecution) {
+          return {
+            executionId: duplicateExecution.id,
+            duplicated: true,
+          };
+        }
+      }
+
+      throw error;
+    }
   }
 
   async findExecutions(tenantId: string, flowId: string) {
@@ -346,7 +397,9 @@ export class FlowsService {
       });
 
       const results = await Promise.allSettled(
-        matching.map((flow) => this.triggerFlow(tenantId, flow.id, contactId)),
+        matching.map((candidateFlow) =>
+          this.triggerFlow(tenantId, candidateFlow.id, contactId),
+        ),
       );
 
       results.forEach((result, index) => {
@@ -385,5 +438,18 @@ export class FlowsService {
         },
       },
     });
+  }
+
+  private buildTriggerRef(flowId: string, contactId: string, now: Date) {
+    const dayRef = now.toISOString().slice(0, 10);
+    return createHash('sha256')
+      .update(`${flowId}:${contactId}:${dayRef}`)
+      .digest('hex');
+  }
+
+  private resolveTimeoutAt(startedAt: Date) {
+    return new Date(
+      startedAt.getTime() + FLOW_EXECUTION_MAX_DURATION_HOURS * 60 * 60 * 1000,
+    );
   }
 }

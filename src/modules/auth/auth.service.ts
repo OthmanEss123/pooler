@@ -1,17 +1,23 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { ApiKeyScope, UserRole } from '@prisma/client';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import * as bcrypt from 'bcrypt';
 import { AuditService } from '../../common/services/audit.service';
 import { PrismaService } from '../../database/prisma/prisma.service';
+import { EmailProviderService } from '../email-provider/email-provider.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import type { JwtPayload } from './strategies/jwt.strategy';
 
 interface AuthAuditContext {
   requestId?: string;
@@ -23,11 +29,21 @@ interface AuthAuditContext {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+  private readonly frontendUrl: string;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly auditService: AuditService,
-  ) {}
+    private readonly configService: ConfigService,
+    private readonly emailProvider: EmailProviderService,
+  ) {
+    this.frontendUrl = this.configService.get<string>(
+      'FRONTEND_URL',
+      'http://localhost:3000',
+    );
+  }
 
   async register(dto: RegisterDto, auditContext?: AuthAuditContext) {
     const normalizedEmail = dto.email.toLowerCase();
@@ -40,21 +56,76 @@ export class AuthService {
       throw new ConflictException('Email already in use');
     }
 
-    const existingTenant = await this.prisma.tenant.findUnique({
-      where: { slug: dto.tenantSlug },
-    });
+    const invitation = dto.inviteToken
+      ? await this.getActiveInvitation(dto.inviteToken)
+      : null;
 
-    if (existingTenant) {
-      throw new ConflictException('Tenant slug already in use');
+    if (
+      invitation &&
+      invitation.email.trim().toLowerCase() !== normalizedEmail
+    ) {
+      throw new BadRequestException(
+        'Cette invitation ne correspond pas a cet email',
+      );
+    }
+
+    if (!invitation) {
+      if (!dto.tenantName || !dto.tenantSlug) {
+        throw new BadRequestException('tenantName and tenantSlug are required');
+      }
+
+      const existingTenant = await this.prisma.tenant.findUnique({
+        where: { slug: dto.tenantSlug },
+      });
+
+      if (existingTenant) {
+        throw new ConflictException('Tenant slug already in use');
+      }
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 12);
 
     const { tenant, user } = await this.prisma.$transaction(async (tx) => {
+      if (invitation) {
+        const tenant = await tx.tenant.findUnique({
+          where: { id: invitation.tenantId },
+        });
+
+        if (!tenant) {
+          throw new NotFoundException('Tenant invitation introuvable');
+        }
+
+        const user = await tx.user.create({
+          data: {
+            tenantId: invitation.tenantId,
+            email: normalizedEmail,
+            passwordHash,
+            firstName: dto.firstName,
+            lastName: dto.lastName,
+            role: invitation.role,
+          },
+        });
+
+        await tx.membership.create({
+          data: {
+            tenantId: invitation.tenantId,
+            userId: user.id,
+            role: invitation.role,
+          },
+        });
+
+        await tx.invitationToken.update({
+          where: { id: invitation.id },
+          data: { usedAt: new Date() },
+        });
+
+        return { tenant, user };
+      }
+
       const tenant = await tx.tenant.create({
         data: {
-          name: dto.tenantName,
-          slug: dto.tenantSlug,
+          name: dto.tenantName!,
+          slug: dto.tenantSlug!,
         },
       });
 
@@ -85,9 +156,16 @@ export class AuthService {
       tenant.id,
       user.email,
       user.role,
+      user.emailVerified,
     );
 
     this.recordSuccessfulRegister(user, auditContext);
+
+    this.sendVerificationEmail(user.id, user.email).catch((err) =>
+      this.logger.error(
+        `Failed to send verification email: ${err instanceof Error ? err.message : 'Unknown'}`,
+      ),
+    );
 
     return {
       user: this.sanitizeUser(user),
@@ -122,6 +200,7 @@ export class AuthService {
       user.tenantId,
       user.email,
       user.role,
+      user.emailVerified,
     );
 
     this.recordSuccessfulLogin(user, auditContext);
@@ -173,6 +252,7 @@ export class AuthService {
       tenantId: existing.user.tenantId,
       email: existing.user.email,
       role: existing.user.role,
+      emailVerified: existing.user.emailVerified,
     });
 
     const newToken = await this.prisma.$transaction(async (tx) => {
@@ -325,6 +405,7 @@ export class AuthService {
       email: user.email,
       role: user.role,
       isActive: user.isActive,
+      emailVerified: user.emailVerified,
     };
   }
 
@@ -356,7 +437,181 @@ export class AuthService {
       role: 'API_KEY' as const,
       scope: apiKey.scope,
       isActive: true,
+      emailVerified: false,
     };
+  }
+
+  async verifyEmail(token: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { verifyToken: token },
+    });
+
+    if (!user) {
+      throw new BadRequestException('Token de verification invalide');
+    }
+
+    if (user.verifyTokenExpiry && user.verifyTokenExpiry < new Date()) {
+      throw new BadRequestException('Token de verification expire');
+    }
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        emailVerified: true,
+        verifyToken: null,
+        verifyTokenExpiry: null,
+      },
+    });
+
+    return { verified: true, email: user.email };
+  }
+
+  async resendVerification(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Utilisateur introuvable');
+    }
+
+    if (user.emailVerified) {
+      throw new BadRequestException('Email deja verifie');
+    }
+
+    await this.sendVerificationEmail(userId, user.email);
+
+    return { sent: true };
+  }
+
+  async acceptInvite(inviteToken: string, userId: string) {
+    const invitation = await this.getActiveInvitation(inviteToken);
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Utilisateur introuvable');
+    }
+
+    if (invitation.email.trim().toLowerCase() !== user.email.toLowerCase()) {
+      throw new BadRequestException(
+        'Cette invitation ne correspond pas a votre email',
+      );
+    }
+
+    const existing = await this.prisma.membership.findUnique({
+      where: {
+        tenantId_userId: {
+          tenantId: invitation.tenantId,
+          userId,
+        },
+      },
+    });
+
+    if (existing) {
+      throw new ConflictException('Deja membre de cette organisation');
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.membership.create({
+        data: {
+          tenantId: invitation.tenantId,
+          userId,
+          role: invitation.role,
+        },
+      }),
+      this.prisma.invitationToken.update({
+        where: { id: invitation.id },
+        data: { usedAt: new Date() },
+      }),
+    ]);
+
+    return { joined: true, tenant: invitation.tenant };
+  }
+
+  async getInvitationInfo(inviteToken: string) {
+    const invitation = await this.getActiveInvitation(inviteToken);
+
+    return {
+      email: invitation.email,
+      tenantName: invitation.tenant.name,
+      role: invitation.role,
+      expiresAt: invitation.expiresAt,
+    };
+  }
+
+  async resolveUserFromAccessToken(accessToken?: string | null) {
+    if (!accessToken) {
+      return null;
+    }
+
+    try {
+      const payload = await this.jwtService.verifyAsync<JwtPayload>(
+        accessToken,
+        {
+          secret: this.configService.getOrThrow<string>('JWT_SECRET'),
+        },
+      );
+
+      return this.validateUserById(payload.sub);
+    } catch {
+      return null;
+    }
+  }
+
+  private async getActiveInvitation(token: string) {
+    const invitation = await this.prisma.invitationToken.findUnique({
+      where: { token },
+      include: { tenant: true },
+    });
+
+    if (!invitation || invitation.usedAt) {
+      throw new BadRequestException('Invitation invalide ou deja utilisee');
+    }
+
+    if (invitation.expiresAt < new Date()) {
+      throw new BadRequestException('Invitation expiree');
+    }
+
+    return invitation;
+  }
+
+  private async sendVerificationEmail(
+    userId: string,
+    email: string,
+  ): Promise<void> {
+    const token = randomBytes(32).toString('hex');
+    const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { verifyToken: token, verifyTokenExpiry: expiry },
+    });
+
+    const verifyUrl = `${this.frontendUrl}/verify-email?token=${token}`;
+
+    await this.emailProvider.sendEmail({
+      to: email,
+      subject: 'Verifiez votre email — Pilot',
+      htmlBody: `
+        <div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:20px">
+          <h2>Bienvenue sur Pilot</h2>
+          <p>Cliquez sur le bouton ci-dessous pour verifier votre adresse email :</p>
+          <a href="${verifyUrl}" style="display:inline-block;padding:12px 24px;background:#4F46E5;color:#fff;text-decoration:none;border-radius:6px">Verifier mon email</a>
+          <p style="color:#999;font-size:12px;margin-top:20px">Ce lien expire dans 24 heures.</p>
+        </div>
+      `,
+      fromName: 'Pilot',
+      fromEmail: this.configService.get<string>(
+        'SES_FROM_DEFAULT',
+        'noreply@pilot.local',
+      ),
+    });
   }
 
   async switchTenant(userId: string, targetTenantId: string) {
@@ -386,6 +641,7 @@ export class AuthService {
       targetTenantId,
       user.email,
       membership.role,
+      user.emailVerified,
     );
 
     return { tokens, tenant: membership.tenant };
@@ -413,6 +669,7 @@ export class AuthService {
     tenantId: string,
     email: string,
     role: UserRole,
+    emailVerified: boolean,
   ) {
     const tokenFamily = randomUUID();
     const accessToken = await this.jwtService.signAsync({
@@ -420,6 +677,7 @@ export class AuthService {
       tenantId,
       email,
       role,
+      emailVerified,
     });
 
     const rawRefreshToken = randomBytes(64).toString('hex');
@@ -524,6 +782,7 @@ export class AuthService {
     lastName?: string | null;
     createdAt: Date;
     lastLoginAt?: Date | null;
+    emailVerified?: boolean;
   }) {
     return {
       id: user.id,
@@ -534,6 +793,7 @@ export class AuthService {
       lastName: user.lastName ?? null,
       createdAt: user.createdAt,
       lastLoginAt: user.lastLoginAt ?? null,
+      emailVerified: user.emailVerified ?? false,
     };
   }
 

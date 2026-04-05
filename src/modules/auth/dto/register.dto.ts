@@ -5,20 +5,23 @@ import {
   IsString,
   Matches,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 
 export class RegisterDto {
+  @ValidateIf((dto: RegisterDto) => !dto.inviteToken)
   @IsString()
   @IsNotEmpty()
-  tenantName: string;
+  tenantName?: string;
 
+  @ValidateIf((dto: RegisterDto) => !dto.inviteToken)
   @IsString()
   @MinLength(3)
   @Matches(/^[a-z0-9-]+$/, {
     message:
       'tenantSlug must contain only lowercase letters, numbers, and hyphens',
   })
-  tenantSlug: string;
+  tenantSlug?: string;
 
   @IsEmail()
   email: string;
@@ -34,4 +37,8 @@ export class RegisterDto {
   @IsOptional()
   @IsString()
   lastName?: string;
+
+  @IsOptional()
+  @IsString()
+  inviteToken?: string;
 }

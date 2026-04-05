@@ -15,15 +15,19 @@ export class FlowQueueService {
     this.queueEnabled = this.config.get<boolean>('QUEUE_ENABLED', true);
   }
 
+  canEnqueue() {
+    return this.queueEnabled && Boolean(this.flowQueue);
+  }
+
   async triggerExecution(executionId: string) {
-    if (!this.queueEnabled || !this.flowQueue) {
+    if (!this.canEnqueue()) {
       this.logger.log(
         `[QUEUE_DISABLED] triggerExecution ignored: ${executionId}`,
       );
       return;
     }
 
-    await this.flowQueue.add(
+    await this.flowQueue!.add(
       'execute-flow',
       { executionId },
       {
@@ -39,14 +43,14 @@ export class FlowQueueService {
     nextStepIndex: number,
     delayMs: number,
   ) {
-    if (!this.queueEnabled || !this.flowQueue) {
+    if (!this.canEnqueue()) {
       this.logger.log(
         `[QUEUE_DISABLED] resumeExecution ignored: ${executionId} -> ${nextStepIndex}`,
       );
       return;
     }
 
-    await this.flowQueue.add(
+    await this.flowQueue!.add(
       'resume-flow',
       { executionId, nextStepIndex },
       {

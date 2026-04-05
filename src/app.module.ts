@@ -18,6 +18,7 @@ import { GrpcModule } from './grpc/grpc.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { BillingModule } from './modules/billing/billing.module';
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
 import { CopilotModule } from './modules/copilot/copilot.module';
 import { ContactsModule } from './modules/contacts/contacts.module';
@@ -28,6 +29,7 @@ import { HealthModule } from './modules/health/health.module';
 import { InsightsModule } from './modules/insights/insights.module';
 import { Ga4Module } from './modules/integrations/ga4/ga4.module';
 import { GoogleAdsModule } from './modules/integrations/google-ads/google-ads.module';
+import { ShopifyModule } from './modules/integrations/shopify/shopify.module';
 import { WooCommerceModule } from './modules/integrations/woocommerce/woocommerce.module';
 import { MembershipsModule } from './modules/memberships/memberships.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
@@ -79,6 +81,7 @@ const nodeEnv = process.env.NODE_ENV ?? 'development';
     EmailEventsModule,
     HealthModule,
     AuthModule,
+    BillingModule,
     AuditModule,
     TenantsModule,
     MembershipsModule,
@@ -93,6 +96,7 @@ const nodeEnv = process.env.NODE_ENV ?? 'development';
     MetricsModule,
     Ga4Module,
     GoogleAdsModule,
+    ShopifyModule,
     WooCommerceModule,
     ScheduleModule.forRoot(),
     InsightsModule,

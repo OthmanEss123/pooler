@@ -1,8 +1,10 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
+import { PrismaService } from '../../database/prisma/prisma.service';
 import { EmailEventsService } from '../../modules/email-events/email-events.service';
 import { EmailProviderService } from '../../modules/email-provider/email-provider.service';
+import { UnsubscribeService } from '../../modules/email-provider/unsubscribe.service';
 import type { SendEmailPayload } from '../services/campaign-queue.service';
 
 @Processor('email', { concurrency: 20 })
@@ -10,7 +12,9 @@ export class EmailProcessor extends WorkerHost {
   private readonly logger = new Logger(EmailProcessor.name);
 
   constructor(
+    private readonly prisma: PrismaService,
     private readonly emailProvider: EmailProviderService,
+    private readonly unsubscribeService: UnsubscribeService,
     private readonly emailEvents: EmailEventsService,
   ) {
     super();
@@ -34,6 +38,25 @@ export class EmailProcessor extends WorkerHost {
       `Sending email to ${contactEmail} for campaign ${campaignId}`,
     );
 
+    const suppression = await this.prisma.globalSuppression.findUnique({
+      where: {
+        tenantId_email: {
+          tenantId,
+          email: contactEmail.trim().toLowerCase(),
+        },
+      },
+    });
+
+    if (suppression) {
+      this.logger.log(`Suppressed email skipped: ${contactEmail}`);
+      return;
+    }
+
+    const unsubscribeUrl = this.unsubscribeService.buildUnsubscribeUrl(
+      tenantId,
+      contactId,
+    );
+
     try {
       const result = await this.emailProvider.sendEmail({
         to: contactEmail,
@@ -43,6 +66,7 @@ export class EmailProcessor extends WorkerHost {
         fromName,
         fromEmail,
         replyTo,
+        unsubscribeUrl,
         tags: {
           campaignId,
           tenantId,
@@ -50,8 +74,6 @@ export class EmailProcessor extends WorkerHost {
         },
       });
 
-      // Track SENT event via EmailEventsService
-      // → updates campaign snapshot + contact status + ClickHouse mirror
       await this.emailEvents.trackEvent(
         {
           campaignId,
@@ -73,7 +95,7 @@ export class EmailProcessor extends WorkerHost {
           error instanceof Error ? error.message : 'Unknown error'
         }`,
       );
-      throw error; // BullMQ will retry
+      throw error;
     }
   }
 }

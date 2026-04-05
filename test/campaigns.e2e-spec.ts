@@ -1,4 +1,4 @@
-﻿/* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/require-await, @typescript-eslint/no-unnecessary-type-assertion */
+/* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/require-await, @typescript-eslint/no-unnecessary-type-assertion */
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ApiKeyScope, CampaignStatus, CampaignType } from '@prisma/client';
@@ -426,6 +426,36 @@ const extendPrismaMock = () => {
   };
 
   prismaMock.emailEvent = {
+    count: jest.fn(
+      async ({
+        where,
+      }: {
+        where?: {
+          tenantId?: string;
+          type?: string;
+          createdAt?: { gte?: Date };
+        };
+      } = {}) => {
+        return emailEvents.filter((candidate) => {
+          if (where?.tenantId && candidate.tenantId !== where.tenantId) {
+            return false;
+          }
+
+          if (where?.type && candidate.type !== where.type) {
+            return false;
+          }
+
+          if (
+            where?.createdAt?.gte &&
+            candidate.createdAt < where.createdAt.gte
+          ) {
+            return false;
+          }
+
+          return true;
+        }).length;
+      },
+    ),
     create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
       const emailEvent: MockEmailEvent = {
         id: `email-event-${emailEventCounter++}`,

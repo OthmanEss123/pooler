@@ -7,6 +7,7 @@ import {
 import { CampaignStatus, CampaignType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma/prisma.service';
 import { CampaignQueueService } from '../../queue/services/campaign-queue.service';
+import { QuotaService } from '../billing/quota.service';
 import { CreateAbTestDto } from './dto/create-ab-test.dto';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
@@ -18,6 +19,7 @@ export class CampaignsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly campaignQueue: CampaignQueueService,
+    private readonly quotaService: QuotaService,
   ) {}
 
   async create(tenantId: string, dto: CreateCampaignDto) {
@@ -130,6 +132,17 @@ export class CampaignsService {
     }
 
     this.campaignQueue.assertAvailable();
+
+    const plannedEmails = await this.prisma.segmentMember.count({
+      where: {
+        segmentId: campaign.segmentId,
+      },
+    });
+
+    await this.quotaService.checkEmailQuota(
+      tenantId,
+      Math.max(plannedEmails, 1),
+    );
 
     await this.prisma.campaign.update({
       where: { id },

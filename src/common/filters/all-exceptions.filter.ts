@@ -8,6 +8,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import * as Sentry from '@sentry/node';
 import type { Response } from 'express';
 import type { AuthRequest } from '../types/auth-request';
 
@@ -33,6 +34,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       'development',
     );
     const isProd = nodeEnv === 'production';
+    const sentryDsn = this.configService.get<string>('SENTRY_DSN');
 
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let errorResponse: unknown = 'Internal server error';
@@ -61,6 +63,16 @@ export class AllExceptionsFilter implements ExceptionFilter {
         }),
         stack,
       );
+
+      if (isProd && sentryDsn) {
+        Sentry.captureException(exception, {
+          extra: {
+            method: request.method,
+            url: request.originalUrl ?? request.url,
+            requestId: request.requestId ?? null,
+          },
+        });
+      }
     }
 
     response.status(status).json({

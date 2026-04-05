@@ -41,6 +41,14 @@ export default () => ({
     metricsToken: process.env.METRICS_TOKEN ?? '',
   },
 
+  stripe: {
+    secretKey: process.env.STRIPE_SECRET_KEY ?? '',
+    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
+    starterPriceId: process.env.STRIPE_STARTER_PRICE_ID ?? '',
+    growthPriceId: process.env.STRIPE_GROWTH_PRICE_ID ?? '',
+    scalePriceId: process.env.STRIPE_SCALE_PRICE_ID ?? '',
+  },
+
   agents: {
     anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? '',
   },

@@ -1,5 +1,10 @@
 export type AnomalySeverity = 'HIGH' | 'MEDIUM';
-export type AttributionModel = 'last_touch' | 'first_touch';
+export type AttributionModel =
+  | 'last_touch'
+  | 'first_touch'
+  | 'linear'
+  | 'time_decay'
+  | 'position_based';
 
 export interface AnalyticsAnomaly {
   severity: AnomalySeverity;

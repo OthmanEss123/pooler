@@ -1,15 +1,21 @@
+import { Type } from 'class-transformer';
 import {
   IsDateString,
-  IsIn,
-  IsInt,
+  IsEnum,
+  IsNumber,
   IsOptional,
-  Max,
   Min,
 } from 'class-validator';
-import { Type } from 'class-transformer';
 
-export const attributionModels = ['last_touch', 'first_touch'] as const;
-export type AttributionModel = (typeof attributionModels)[number];
+export enum AttributionModel {
+  LAST_TOUCH = 'last_touch',
+  LAST_CLICK = 'last_click',
+  FIRST_TOUCH = 'first_touch',
+  FIRST_CLICK = 'first_click',
+  LINEAR = 'linear',
+  TIME_DECAY = 'time_decay',
+  POSITION_BASED = 'position_based',
+}
 
 export class QueryAttributionDto {
   @IsDateString()
@@ -18,21 +24,37 @@ export class QueryAttributionDto {
   @IsDateString()
   to!: string;
 
+  @IsEnum(AttributionModel)
   @IsOptional()
-  @IsIn(attributionModels)
-  model?: AttributionModel;
+  model?: AttributionModel = AttributionModel.LAST_TOUCH;
 
-  @IsOptional()
   @Type(() => Number)
-  @IsInt()
+  @IsNumber()
   @Min(1)
-  @Max(100)
-  limit?: number;
+  @IsOptional()
+  limit?: number = 10;
 
-  @IsOptional()
   @Type(() => Number)
-  @IsInt()
+  @IsNumber()
   @Min(1)
-  @Max(90)
-  lookbackDays?: number;
+  @IsOptional()
+  lookbackDays?: number = 30;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  @IsOptional()
+  emailWindowHours?: number = 72;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  @IsOptional()
+  googleWindowDays?: number = 7;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  @IsOptional()
+  organicWindowDays?: number = 30;
 }

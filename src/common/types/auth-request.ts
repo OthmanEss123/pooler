@@ -10,6 +10,7 @@ export interface AuthenticatedUser {
   role: AuthenticatedRole;
   scope?: ApiKeyScope;
   isActive: boolean;
+  emailVerified: boolean;
 }
 
 export interface AuthCookies {

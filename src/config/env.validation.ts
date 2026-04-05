@@ -38,11 +38,11 @@ export const envValidation = Joi.object({
   SES_FROM_DEFAULT: Joi.string().default('noreply@pilot.local'),
   SNS_TOPIC_ARN: Joi.string().allow('').optional(),
 
-  STRIPE_SECRET_KEY: Joi.string().allow('').optional(),
-  STRIPE_WEBHOOK_SECRET: Joi.string().allow('').optional(),
-  STRIPE_STARTER_PRICE_ID: Joi.string().allow('').optional(),
-  STRIPE_GROWTH_PRICE_ID: Joi.string().allow('').optional(),
-  STRIPE_SCALE_PRICE_ID: Joi.string().allow('').optional(),
+  STRIPE_SECRET_KEY: Joi.string().required(),
+  STRIPE_WEBHOOK_SECRET: Joi.string().required(),
+  STRIPE_STARTER_PRICE_ID: Joi.string().required(),
+  STRIPE_GROWTH_PRICE_ID: Joi.string().required(),
+  STRIPE_SCALE_PRICE_ID: Joi.string().required(),
 
   SHOPIFY_API_KEY: Joi.string().allow('').optional(),
   SHOPIFY_API_SECRET: Joi.string().allow('').optional(),

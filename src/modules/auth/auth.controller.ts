@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Post,
+  Query,
   Req,
   Res,
   UnauthorizedException,
@@ -205,6 +206,36 @@ export class AuthController {
       ipAddress: req.ip,
       userAgent: req.get('user-agent') ?? null,
     });
+  }
+
+  @Public()
+  @Get('verify-email')
+  async verifyEmail(@Query('token') token: string) {
+    return this.authService.verifyEmail(token);
+  }
+
+  @Throttle({ auth: { limit: 1, ttl: 60000 } })
+  @Post('resend-verification')
+  async resendVerification(@CurrentUser() user: AuthenticatedUser) {
+    if (!user.id) {
+      throw new UnauthorizedException('User token required');
+    }
+    return this.authService.resendVerification(user.id);
+  }
+
+  @Public()
+  @Get('accept-invite')
+  async acceptInvite(@Query('token') token: string, @Req() req: AuthRequest) {
+    const authenticatedUser = await this.authService.resolveUserFromAccessToken(
+      req.cookies?.access_token ?? null,
+    );
+
+    if (authenticatedUser?.id) {
+      return this.authService.acceptInvite(token, authenticatedUser.id);
+    }
+
+    const invitation = await this.authService.getInvitationInfo(token);
+    return { requiresAccount: true, ...invitation };
   }
 
   private setAuthCookies(

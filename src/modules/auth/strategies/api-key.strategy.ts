@@ -46,6 +46,7 @@ export class ApiKeyStrategy extends PassportStrategy(Strategy, 'api-key') {
       role: 'API_KEY',
       scope: apiKey.scope,
       isActive: true,
+      emailVerified: false,
     };
   }
 }

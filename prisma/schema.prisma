@@ -18,6 +18,21 @@ enum ApiKeyScope {
   INGEST
 }
 
+enum BillingPlan {
+  STARTER
+  GROWTH
+  SCALE
+}
+
+enum BillingSubscriptionStatus {
+  ACTIVE
+  TRIALING
+  PAST_DUE
+  INCOMPLETE
+  CANCELED
+  UNPAID
+}
+
 enum EmailStatus {
   SUBSCRIBED
   UNSUBSCRIBED
@@ -93,24 +108,29 @@ enum AdCampaignStatus {
 }
 
 model Tenant {
-  id        String   @id @default(cuid())
-  name      String
-  slug      String   @unique
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String                    @id @default(cuid())
+  name       String
+  slug       String                    @unique
+  isActive   Boolean                   @default(true)
+  plan       BillingPlan               @default(STARTER)
+  planStatus BillingSubscriptionStatus @default(ACTIVE)
+  createdAt  DateTime                  @default(now())
+  updatedAt  DateTime                  @updatedAt
 
-  users          User[]
-  refreshTokens  RefreshToken[]
-  apiKeys        ApiKey[]
-  memberships    Membership[]
-  insights       Insight[]
-  healthScores   CustomerHealthScore[]
-  flows          Flow[]
-  flowExecutions FlowExecution[]
-  integrations   Integration[]
-  adCampaigns    AdCampaign[]
-  adAudiences    AdAudience[]
+  users               User[]
+  refreshTokens       RefreshToken[]
+  apiKeys             ApiKey[]
+  memberships         Membership[]
+  insights            Insight[]
+  healthScores        CustomerHealthScore[]
+  flows               Flow[]
+  flowExecutions      FlowExecution[]
+  integrations        Integration[]
+  adCampaigns         AdCampaign[]
+  adAudiences         AdAudience[]
+  billingSubscription  BillingSubscription?
+  globalSuppressions   GlobalSuppression[]
+  invitationTokens     InvitationToken[]
 
   @@map("tenants")
 }
@@ -123,10 +143,13 @@ model User {
   firstName    String?
   lastName     String?
   role         UserRole  @default(MEMBER)
-  isActive     Boolean   @default(true)
-  lastLoginAt  DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  isActive          Boolean   @default(true)
+  emailVerified     Boolean   @default(false)
+  verifyToken       String?   @unique
+  verifyTokenExpiry DateTime?
+  lastLoginAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   refreshTokens RefreshToken[]
@@ -199,6 +222,25 @@ model Membership {
   @@index([userId])
   @@map("memberships")
 }
+model BillingSubscription {
+  id                   String                    @id @default(cuid())
+  tenantId             String                    @unique
+  plan                 BillingPlan               @default(STARTER)
+  status               BillingSubscriptionStatus @default(ACTIVE)
+  stripeCustomerId     String?                   @unique
+  stripeSubscriptionId String?                   @unique
+  stripePriceId        String?
+  currentPeriodStart   DateTime?
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean                   @default(false)
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@map("billing_subscriptions")
+}
 
 model Contact {
   id       String @id @default(uuid())
@@ -216,10 +258,12 @@ model Contact {
   totalOrders  Int                      @default(0)
   embedding    Unsupported("vector(1536)")?
 
-  firstOrderAt DateTime?
-  lastOrderAt  DateTime?
-  bouncedAt    DateTime?
-  complainedAt DateTime?
+  firstOrderAt   DateTime?
+  lastOrderAt    DateTime?
+  subscribed     Boolean                  @default(true)
+  unsubscribedAt DateTime?
+  bouncedAt      DateTime?
+  complainedAt   DateTime?
 
   healthScore CustomerHealthScore?
 
@@ -525,26 +569,28 @@ model FlowExecution {
   flowId           String
   contactId        String
   tenantId         String
+  triggerRef       String
   status           FlowExecutionStatus @default(RUNNING)
   currentStepIndex Int                 @default(0)
   startedAt        DateTime            @default(now())
+  timeoutAt        DateTime?
+  lastHeartbeat    DateTime?
   completedAt      DateTime?
   failedAt         DateTime?
   error            String?
   createdAt        DateTime            @default(now())
   updatedAt        DateTime            @updatedAt
-
   flow    Flow                @relation(fields: [flowId], references: [id], onDelete: Cascade)
   contact Contact             @relation(fields: [contactId], references: [id], onDelete: Cascade)
   tenant  Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   steps   FlowExecutionStep[]
-
+  @@unique([flowId, contactId, triggerRef])
   @@index([tenantId])
   @@index([flowId])
   @@index([contactId])
   @@index([tenantId, status])
+  @@index([status, lastHeartbeat])
 }
-
 model FlowExecutionStep {
   id          String     @id @default(cuid())
   executionId String
@@ -646,6 +692,45 @@ model AdAudience {
   @@index([segmentId])
 }
 
+enum SuppressionReason {
+  UNSUBSCRIBED
+  BOUNCED
+  COMPLAINED
+  GDPR_REQUEST
+  MANUAL
+}
+
+model GlobalSuppression {
+  id        String            @id @default(cuid())
+  tenantId  String
+  email     String
+  reason    SuppressionReason
+  createdAt DateTime          @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@map("global_suppressions")
+}
+
+model InvitationToken {
+  id        String    @id @default(cuid())
+  tenantId  String
+  email     String
+  role      UserRole  @default(MEMBER)
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([expiresAt])
+  @@map("invitation_tokens")
+}
+
 model AdAudienceMember {
   audienceId    String
   contactId     String
@@ -657,5 +742,7 @@ model AdAudienceMember {
   @@id([audienceId, contactId])
   @@index([contactId])
 }
+
+
 
 

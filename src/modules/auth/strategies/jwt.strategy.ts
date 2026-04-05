@@ -11,6 +11,7 @@ export interface JwtPayload {
   tenantId: string;
   email: string;
   role: string;
+  emailVerified?: boolean;
 }
 
 type CookieRequest = Request & {
@@ -41,36 +42,48 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   }
 
   async validate(payload: JwtPayload): Promise<AuthenticatedUser> {
-    const user = await this.prisma.user.findUnique({
-      where: { id: payload.sub },
-      select: {
-        id: true,
-        tenantId: true,
-        email: true,
-        role: true,
-        isActive: true,
-        tenant: {
-          select: {
-            isActive: true,
+    const [user, membership] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: payload.sub },
+        select: {
+          id: true,
+          email: true,
+          isActive: true,
+          emailVerified: true,
+        },
+      }),
+      this.prisma.membership.findUnique({
+        where: {
+          tenantId_userId: {
+            tenantId: payload.tenantId,
+            userId: payload.sub,
           },
         },
-      },
-    });
+        include: {
+          tenant: {
+            select: {
+              isActive: true,
+            },
+          },
+        },
+      }),
+    ]);
 
     if (!user || !user.isActive) {
       throw new UnauthorizedException('Utilisateur inactif ou introuvable');
     }
 
-    if (!user.tenant || !user.tenant.isActive) {
+    if (!membership || !membership.tenant || !membership.tenant.isActive) {
       throw new UnauthorizedException('Tenant inactif ou introuvable');
     }
 
     return {
       id: user.id,
-      tenantId: user.tenantId,
+      tenantId: payload.tenantId,
       email: user.email,
-      role: user.role,
+      role: membership.role,
       isActive: user.isActive,
+      emailVerified: user.emailVerified,
     };
   }
 }

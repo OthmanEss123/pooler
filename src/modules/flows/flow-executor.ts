@@ -3,7 +3,10 @@ import { FlowExecutionStatus, Prisma, StepStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma/prisma.service';
 import { FlowQueueService } from '../../queue/services/flow-queue.service';
 import { EmailProviderService } from '../email-provider/email-provider.service';
+import { UnsubscribeService } from '../email-provider/unsubscribe.service';
 import { FlowNodeType } from './dto/create-flow.dto';
+
+const FLOW_EXECUTION_MAX_DURATION_HOURS = 24;
 
 const toInputJsonValue = (value: unknown): Prisma.InputJsonValue =>
   JSON.parse(JSON.stringify(value ?? null)) as Prisma.InputJsonValue;
@@ -24,6 +27,7 @@ export class FlowExecutor {
   constructor(
     private readonly prisma: PrismaService,
     private readonly emailProvider: EmailProviderService,
+    private readonly unsubscribeService: UnsubscribeService,
     private readonly flowQueueService: FlowQueueService,
   ) {}
 
@@ -44,6 +48,20 @@ export class FlowExecutor {
       return;
     }
 
+    const timeoutAt =
+      execution.timeoutAt ??
+      new Date(
+        execution.startedAt.getTime() +
+          FLOW_EXECUTION_MAX_DURATION_HOURS * 60 * 60 * 1000,
+      );
+
+    if (timeoutAt.getTime() <= Date.now()) {
+      await this.markExecutionFailed(executionId, 'Execution timeout');
+      return;
+    }
+
+    await this.touchHeartbeat(executionId);
+
     const nodes = execution.flow.nodes as Array<Record<string, unknown>>;
     const currentIndex = execution.currentStepIndex;
     const node = nodes[currentIndex];
@@ -54,6 +72,7 @@ export class FlowExecutor {
         data: {
           status: FlowExecutionStatus.COMPLETED,
           completedAt: new Date(),
+          lastHeartbeat: new Date(),
         },
       });
       return;
@@ -108,6 +127,7 @@ export class FlowExecutor {
         where: { id: execution.id },
         data: {
           currentStepIndex: result.nextStepIndex,
+          lastHeartbeat: new Date(),
         },
       });
 
@@ -123,14 +143,7 @@ export class FlowExecutor {
         },
       });
 
-      await this.prisma.flowExecution.update({
-        where: { id: execution.id },
-        data: {
-          status: FlowExecutionStatus.FAILED,
-          failedAt: new Date(),
-          error: message,
-        },
-      });
+      await this.markExecutionFailed(execution.id, message);
 
       throw error;
     }
@@ -230,10 +243,19 @@ export class FlowExecutor {
       },
     });
 
+    const suppression = await this.prisma.globalSuppression.findUnique({
+      where: {
+        tenantId_email: {
+          tenantId: execution.tenantId,
+          email: contactEmail.trim().toLowerCase(),
+        },
+      },
+    });
+
     let messageId: string | undefined;
     let provider: string | undefined;
 
-    if (!alreadySent) {
+    if (!alreadySent && !suppression) {
       this.logger.log(`Send email to ${contactEmail} | subject=${subject}`);
 
       const result = await this.emailProvider.sendEmail({
@@ -244,6 +266,10 @@ export class FlowExecutor {
         fromName,
         fromEmail,
         replyTo,
+        unsubscribeUrl: this.unsubscribeService.buildUnsubscribeUrl(
+          execution.tenantId,
+          execution.contactId,
+        ),
         tags: {
           tenantId: execution.tenantId,
           contactId: execution.contactId,
@@ -303,19 +329,24 @@ export class FlowExecutor {
       throw new Error('nextId introuvable pour wait');
     }
 
+    const delayMs = delayHours * 60 * 60 * 1000;
+    const resumeAt = new Date(Date.now() + delayMs);
+
     await this.prisma.flowExecution.update({
       where: { id: execution.id },
       data: {
         currentStepIndex: nextStepIndex,
+        lastHeartbeat: resumeAt,
       },
     });
 
     return {
       scheduleResume: true,
       nextStepIndex,
-      delayMs: delayHours * 60 * 60 * 1000,
+      delayMs,
       result: {
         delayHours,
+        resumeAt: resumeAt.toISOString(),
       },
     };
   }
@@ -442,6 +473,7 @@ export class FlowExecutor {
       data: {
         status: FlowExecutionStatus.COMPLETED,
         completedAt: new Date(),
+        lastHeartbeat: new Date(),
       },
     });
 
@@ -452,5 +484,26 @@ export class FlowExecutor {
         finished: true,
       },
     };
+  }
+
+  private async touchHeartbeat(executionId: string, at = new Date()) {
+    await this.prisma.flowExecution.update({
+      where: { id: executionId },
+      data: {
+        lastHeartbeat: at,
+      },
+    });
+  }
+
+  private async markExecutionFailed(executionId: string, message: string) {
+    await this.prisma.flowExecution.update({
+      where: { id: executionId },
+      data: {
+        status: FlowExecutionStatus.FAILED,
+        failedAt: new Date(),
+        error: message,
+        lastHeartbeat: new Date(),
+      },
+    });
   }
 }

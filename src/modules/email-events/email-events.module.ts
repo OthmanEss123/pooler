@@ -1,4 +1,4 @@
-﻿import { Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ClickhouseModule } from '../../database/clickhouse/clickhouse.module';
 import { PrismaModule } from '../../database/prisma/prisma.module';
 import { EmailEventsController } from './email-events.controller';

@@ -9,8 +9,11 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
+import { Throttle } from '@nestjs/throttler';
 import { CurrentTenant } from '../../common/decorators/current-tenant.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -35,6 +38,17 @@ export class ContactsController {
   @Get()
   findAll(@CurrentTenant() tenantId: string, @Query() query: QueryContactsDto) {
     return this.contactsService.findAll(tenantId, query);
+  }
+
+  @Get('export')
+  @Roles('OWNER', 'ADMIN')
+  @Throttle({ global: { limit: 1, ttl: 60000 } })
+  exportCsv(
+    @CurrentTenant() tenantId: string,
+    @Query() query: QueryContactsDto,
+    @Res() res: Response,
+  ) {
+    return this.contactsService.streamCsv(tenantId, query, res);
   }
 
   @Get('recent-buyers')

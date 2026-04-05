@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -17,6 +18,7 @@ import { RolesGuard } from '../../../common/guards/roles.guard';
 import { ConnectGoogleAdsDto } from './dto/connect-google-ads.dto';
 import { SyncGoogleAdsAudienceDto } from './dto/sync-google-ads-audience.dto';
 import { SyncGoogleAdsMetricsDto } from './dto/sync-google-ads-metrics.dto';
+import { UpdateGoogleAdsBudgetDto } from './dto/update-google-ads-budget.dto';
 import { GoogleAdsService } from './google-ads.service';
 
 @Controller('integrations/google-ads')
@@ -97,6 +99,34 @@ export class GoogleAdsController {
   @Get('campaigns/:id')
   getCampaign(@CurrentTenant() tenantId: string, @Param('id') id: string) {
     return this.googleAdsService.getCampaignById(tenantId, id);
+  }
+
+  @Post('campaigns/:id/pause')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(RolesGuard)
+  @Roles('OWNER', 'ADMIN')
+  pauseCampaign(@CurrentTenant() tenantId: string, @Param('id') id: string) {
+    return this.googleAdsService.pauseCampaign(tenantId, id);
+  }
+
+  @Post('campaigns/:id/enable')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(RolesGuard)
+  @Roles('OWNER', 'ADMIN')
+  enableCampaign(@CurrentTenant() tenantId: string, @Param('id') id: string) {
+    return this.googleAdsService.enableCampaign(tenantId, id);
+  }
+
+  @Patch('campaigns/:id/budget')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(RolesGuard)
+  @Roles('OWNER', 'ADMIN')
+  updateBudget(
+    @CurrentTenant() tenantId: string,
+    @Param('id') id: string,
+    @Body() body: UpdateGoogleAdsBudgetDto,
+  ) {
+    return this.googleAdsService.updateBudget(tenantId, id, body.budgetMicros);
   }
 
   @Post('audiences/sync')
