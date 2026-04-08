@@ -3,8 +3,6 @@ import {
   Injectable,
   Logger,
   NotFoundException,
-  Inject,
-  forwardRef,
 } from '@nestjs/common';
 import {
   IntegrationStatus,
@@ -16,8 +14,7 @@ import { createHmac, timingSafeEqual } from 'crypto';
 import { EncryptionService } from '../../../common/services/encryption.service';
 import { PrismaService } from '../../../database/prisma/prisma.service';
 import { SyncQueueService } from '../../../queue/services/sync-queue.service';
-import { FlowTriggerType } from '../../flows/dto/create-flow.dto';
-import { FlowsService } from '../../flows/flows.service';
+import { OrdersService } from '../../orders/orders.service';
 import { ConnectWooCommerceDto } from './dto/connect-woocommerce.dto';
 
 type WooCredentials = {
@@ -43,9 +40,8 @@ export class WooCommerceService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly encryptionService: EncryptionService,
-    @Inject(forwardRef(() => FlowsService))
-    private readonly flowsService: FlowsService,
     private readonly syncQueueService: SyncQueueService,
+    private readonly ordersService: OrdersService,
   ) {}
 
   async connect(tenantId: string, dto: ConnectWooCommerceDto) {
@@ -278,86 +274,42 @@ export class WooCommerceService {
     const status = this.mapOrderStatus(
       this.getString(wcOrder.status, 'pending'),
     );
-    const placedAt = this.parseDate(wcOrder.date_created);
     const orderNumber = this.getString(wcOrder.number, externalId);
     const currency = this.getString(wcOrder.currency, 'USD');
+    const lineItems = this.getRecordArray(wcOrder.line_items);
 
-    const order = await this.prisma.$transaction(async (tx) => {
-      const upsertedOrder = await tx.order.upsert({
-        where: {
-          tenantId_externalId: {
-            tenantId,
-            externalId,
-          },
-        },
-        update: {
-          tenantId,
-          contactId: contact.id,
-          orderNumber,
-          status,
-          totalAmount: this.parseDecimal(wcOrder.total),
-          subtotal: this.parseDecimal(wcOrder.total),
-          currency,
-          source: 'woocommerce',
-          rawPayload: toInputJsonValue(wcOrder),
-          placedAt,
-        },
-        create: {
-          tenantId,
-          contactId: contact.id,
-          externalId,
-          orderNumber,
-          status,
-          totalAmount: this.parseDecimal(wcOrder.total),
-          subtotal: this.parseDecimal(wcOrder.total),
-          currency,
-          source: 'woocommerce',
-          rawPayload: toInputJsonValue(wcOrder),
-          placedAt,
-        },
-      });
-
-      await tx.orderItem.deleteMany({
-        where: {
-          orderId: upsertedOrder.id,
-        },
-      });
-
-      const lineItems = this.getRecordArray(wcOrder.line_items);
-
-      if (lineItems.length > 0) {
-        await tx.orderItem.createMany({
-          data: lineItems.map((record, index) => {
-            const itemExternalId =
-              this.getNullableString(record.id) ??
-              `${externalId}-${this.getNullableString(record.product_id) ?? index}`;
-
-            return {
-              tenantId,
-              orderId: upsertedOrder.id,
-              externalId: itemExternalId,
-              productExternalId: this.getNullableString(record.product_id),
-              name: this.getString(record.name, 'Unnamed item'),
-              sku: this.getNullableString(record.sku),
-              quantity: this.parseInteger(record.quantity, 1),
-              unitPrice: this.parseDecimal(record.price),
-              totalPrice: this.parseDecimal(record.total ?? record.price),
-            };
-          }),
-          skipDuplicates: true,
-        });
-      }
-
-      return upsertedOrder;
-    });
-
-    await this.recalculateContactMetrics(contact.id);
-
-    return {
-      order,
-      contactId: contact.id,
+    return this.ordersService.upsertExternalOrder(tenantId, {
+      contactEmail: contact.email,
+      externalId,
+      orderNumber,
       status,
-    };
+      totalAmount: Number(this.parseDecimal(wcOrder.total).toString()),
+      subtotal: Number(this.parseDecimal(wcOrder.total).toString()),
+      currency,
+      source: 'woocommerce',
+      rawPayload: toInputJsonValue(wcOrder),
+      placedAt: this.parseDate(wcOrder.date_created).toISOString(),
+      emitFlows: false,
+      items: await Promise.all(
+        lineItems.map(async (record) => {
+          const quantity = this.parseInteger(record.quantity, 1);
+          const unitPrice = Number(this.parseDecimal(record.price).toString());
+
+          return {
+            productId: await this.resolveProductId(tenantId, record),
+            productExternalId: this.getNullableString(record.product_id),
+            sku: this.getNullableString(record.sku),
+            name: this.getString(record.name, 'Unnamed item'),
+            quantity,
+            unitPrice,
+            totalPrice:
+              Number(
+                this.parseDecimal(record.total ?? record.price).toString(),
+              ) || unitPrice * quantity,
+          };
+        }),
+      ),
+    });
   }
 
   async upsertProduct(tenantId: string, wcProduct: Record<string, unknown>) {
@@ -448,19 +400,7 @@ export class WooCommerceService {
     switch (topic) {
       case 'order.created':
       case 'order.updated': {
-        const result = await this.upsertOrder(tenantId, payload);
-
-        if (
-          result.contactId &&
-          (result.status === OrderStatus.PAID ||
-            result.status === OrderStatus.FULFILLED)
-        ) {
-          void this.flowsService.triggerFlowsSafe(
-            tenantId,
-            FlowTriggerType.POST_PURCHASE,
-            result.contactId,
-          );
-        }
+        await this.upsertOrderFromWebhook(tenantId, payload);
         break;
       }
 
@@ -480,7 +420,6 @@ export class WooCommerceService {
           },
           select: {
             id: true,
-            contactId: true,
           },
         });
 
@@ -488,14 +427,12 @@ export class WooCommerceService {
           break;
         }
 
-        await this.prisma.order.update({
-          where: { id: existingOrder.id },
-          data: {
-            status: OrderStatus.CANCELLED,
-          },
-        });
-
-        await this.recalculateContactMetrics(existingOrder.contactId);
+        await this.ordersService.updateStatus(
+          tenantId,
+          existingOrder.id,
+          OrderStatus.CANCELLED,
+          { emitPostPurchaseEffects: false },
+        );
         break;
       }
 
@@ -740,33 +677,83 @@ export class WooCommerceService {
     });
   }
 
-  private async recalculateContactMetrics(contactId: string) {
-    const paidOrders = await this.prisma.order.findMany({
-      where: {
-        contactId,
-        status: { in: [OrderStatus.PAID, OrderStatus.FULFILLED] },
-      },
-      select: {
-        totalAmount: true,
-        placedAt: true,
-      },
-      orderBy: { placedAt: 'asc' },
-    });
+  private async upsertOrderFromWebhook(
+    tenantId: string,
+    wcOrder: Record<string, unknown>,
+  ) {
+    const billing = this.asBilling(wcOrder.billing);
+    const externalId = this.getNullableString(wcOrder.id);
 
-    const totalRevenue = paidOrders.reduce(
-      (sum, order) => sum.plus(order.totalAmount),
-      new Prisma.Decimal(0),
+    if (!externalId) {
+      throw new BadRequestException('Commande WooCommerce sans id');
+    }
+
+    const contact = await this.findOrCreateContact(
+      tenantId,
+      billing,
+      externalId,
     );
+    const status = this.mapOrderStatus(
+      this.getString(wcOrder.status, 'pending'),
+    );
+    const orderNumber = this.getString(wcOrder.number, externalId);
+    const currency = this.getString(wcOrder.currency, 'USD');
+    const lineItems = this.getRecordArray(wcOrder.line_items);
 
-    await this.prisma.contact.update({
-      where: { id: contactId },
-      data: {
-        totalOrders: paidOrders.length,
-        totalRevenue,
-        firstOrderAt: paidOrders[0]?.placedAt ?? null,
-        lastOrderAt: paidOrders[paidOrders.length - 1]?.placedAt ?? null,
-      },
+    return this.ordersService.upsertExternalOrder(tenantId, {
+      contactEmail: contact.email,
+      externalId,
+      orderNumber,
+      status,
+      totalAmount: Number(this.parseDecimal(wcOrder.total).toString()),
+      subtotal: Number(this.parseDecimal(wcOrder.total).toString()),
+      currency,
+      source: 'woocommerce',
+      rawPayload: toInputJsonValue(wcOrder),
+      placedAt: this.parseDate(wcOrder.date_created).toISOString(),
+      emitFlows: true,
+      items: await Promise.all(
+        lineItems.map(async (record) => {
+          const quantity = this.parseInteger(record.quantity, 1);
+          const unitPrice = Number(this.parseDecimal(record.price).toString());
+
+          return {
+            productId: await this.resolveProductId(tenantId, record),
+            productExternalId: this.getNullableString(record.product_id),
+            sku: this.getNullableString(record.sku),
+            name: this.getString(record.name, 'Unnamed item'),
+            quantity,
+            unitPrice,
+            totalPrice:
+              Number(
+                this.parseDecimal(record.total ?? record.price).toString(),
+              ) || unitPrice * quantity,
+          };
+        }),
+      ),
     });
+  }
+
+  private async resolveProductId(
+    tenantId: string,
+    item: Record<string, unknown>,
+  ): Promise<string | null> {
+    const externalId = this.getNullableString(item.product_id);
+
+    if (!externalId) {
+      return null;
+    }
+
+    const product = await this.prisma.product.findFirst({
+      where: {
+        tenantId,
+        externalId,
+        isActive: true,
+      },
+      select: { id: true },
+    });
+
+    return product?.id ?? null;
   }
 
   private async touchLastSync(tenantId: string) {

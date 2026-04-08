@@ -3,7 +3,7 @@ import { RolesGuard } from '../../../common/guards/roles.guard';
 import { EncryptionModule } from '../../../common/services/encryption.module';
 import { PrismaModule } from '../../../database/prisma/prisma.module';
 import { QueueModule } from '../../../queue/queue.module';
-import { FlowsModule } from '../../flows/flows.module';
+import { OrdersModule } from '../../orders/orders.module';
 import { WooCommerceController } from './woocommerce.controller';
 import { WooCommerceService } from './woocommerce.service';
 
@@ -11,7 +11,7 @@ import { WooCommerceService } from './woocommerce.service';
   imports: [
     PrismaModule,
     EncryptionModule,
-    forwardRef(() => FlowsModule),
+    OrdersModule,
     forwardRef(() => QueueModule),
   ],
   controllers: [WooCommerceController],

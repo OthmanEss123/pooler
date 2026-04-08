@@ -14,6 +14,7 @@ import {
 import { EncryptionService } from '../../../common/services/encryption.service';
 import { PrismaService } from '../../../database/prisma/prisma.service';
 import { SyncQueueService } from '../../../queue/services/sync-queue.service';
+import { OrdersService } from '../../orders/orders.service';
 
 type ShopifyCredentials = {
   accessToken: string;
@@ -30,6 +31,7 @@ export class ShopifyService {
     private readonly config: ConfigService,
     private readonly encryptionService: EncryptionService,
     private readonly syncQueueService: SyncQueueService,
+    private readonly ordersService: OrdersService,
   ) {}
 
   async connect(tenantId: string, shop: string, accessToken: string) {
@@ -172,12 +174,13 @@ export class ShopifyService {
     }
 
     const customer = this.asRecord(shopifyOrder.customer);
-    const email =
-      this.getNullableString(customer?.email) ??
-      this.getNullableString(shopifyOrder.email) ??
-      `guest+shopify-${tenantId}-${externalId}@pilot.local`;
-    const firstName = this.getNullableString(customer?.first_name);
-    const lastName = this.getNullableString(customer?.last_name);
+    const fallbackEmail = this.getNullableString(shopifyOrder.email);
+    const contact = await this.findOrCreateContact(
+      tenantId,
+      customer,
+      externalId,
+      fallbackEmail,
+    );
     const financialStatus = this.getString(
       shopifyOrder.financial_status,
       'pending',
@@ -187,93 +190,44 @@ export class ShopifyService {
       this.getString(shopifyOrder.name) ||
       this.getString(shopifyOrder.order_number, externalId);
     const currency = this.getString(shopifyOrder.currency, 'USD');
-    const placedAt = this.parseDate(shopifyOrder.created_at);
+    const lineItems = this.asRecordArray(shopifyOrder.line_items);
 
-    const contact = await this.prisma.contact.upsert({
-      where: {
-        tenantId_email: {
-          tenantId,
-          email: email.trim().toLowerCase(),
-        },
-      },
-      update: {
-        firstName: firstName ?? undefined,
-        lastName: lastName ?? undefined,
-        sourceChannel: 'shopify',
-      },
-      create: {
-        tenantId,
-        email: email.trim().toLowerCase(),
-        firstName,
-        lastName,
-        sourceChannel: 'shopify',
-      },
-    });
+    return this.ordersService.upsertExternalOrder(tenantId, {
+      contactEmail: contact.email,
+      externalId,
+      orderNumber,
+      status,
+      totalAmount: Number(
+        this.parseDecimal(shopifyOrder.total_price).toString(),
+      ),
+      subtotal: Number(
+        this.parseDecimal(shopifyOrder.subtotal_price).toString(),
+      ),
+      currency,
+      source: 'shopify',
+      rawPayload: this.toInputJsonValue(shopifyOrder),
+      placedAt: this.parseDate(shopifyOrder.created_at).toISOString(),
+      emitFlows: false,
+      items: await Promise.all(
+        lineItems.map(async (item) => {
+          const quantity = this.parseInteger(item.quantity, 1);
+          const unitPrice = Number(this.parseDecimal(item.price).toString());
 
-    const order = await this.prisma.$transaction(async (tx) => {
-      const upsertedOrder = await tx.order.upsert({
-        where: {
-          tenantId_externalId: {
-            tenantId,
-            externalId,
-          },
-        },
-        update: {
-          tenantId,
-          contactId: contact.id,
-          orderNumber,
-          status,
-          totalAmount: this.parseDecimal(shopifyOrder.total_price),
-          subtotal: this.parseDecimal(shopifyOrder.subtotal_price),
-          currency,
-          source: 'shopify',
-          rawPayload: this.toInputJsonValue(shopifyOrder),
-          placedAt,
-        },
-        create: {
-          tenantId,
-          contactId: contact.id,
-          externalId,
-          orderNumber,
-          status,
-          totalAmount: this.parseDecimal(shopifyOrder.total_price),
-          subtotal: this.parseDecimal(shopifyOrder.subtotal_price),
-          currency,
-          source: 'shopify',
-          rawPayload: this.toInputJsonValue(shopifyOrder),
-          placedAt,
-        },
-      });
-
-      await tx.orderItem.deleteMany({ where: { orderId: upsertedOrder.id } });
-
-      const lineItems = this.asRecordArray(shopifyOrder.line_items);
-      if (lineItems.length > 0) {
-        await tx.orderItem.createMany({
-          data: lineItems.map((item, index) => ({
-            tenantId,
-            orderId: upsertedOrder.id,
-            externalId:
-              this.getNullableString(item.id) ??
-              `${externalId}-item-${index + 1}`,
-            productId: null,
+          return {
+            productId: await this.resolveProductId(tenantId, item),
             productExternalId: this.getNullableString(item.product_id),
-            name: this.getString(item.name, 'Unnamed item'),
             sku: this.getNullableString(item.sku),
-            quantity: this.parseInteger(item.quantity, 1),
-            unitPrice: this.parseDecimal(item.price),
-            totalPrice: this.parseDecimal(item.price),
-          })),
-          skipDuplicates: true,
-        });
-      }
-
-      return upsertedOrder;
+            name: this.getString(item.name, 'Unnamed item'),
+            quantity,
+            unitPrice,
+            totalPrice:
+              Number(
+                this.parseDecimal(item.line_price ?? item.price).toString(),
+              ) || unitPrice * quantity,
+          };
+        }),
+      ),
     });
-
-    await this.recalculateContactMetrics(contact.id);
-
-    return { order, contactId: contact.id, status };
   }
 
   async upsertProduct(
@@ -426,33 +380,61 @@ export class ShopifyService {
     });
   }
 
-  private async recalculateContactMetrics(contactId: string) {
-    const paidOrders = await this.prisma.order.findMany({
+  private async findOrCreateContact(
+    tenantId: string,
+    customer: Record<string, unknown> | null,
+    orderExternalId: string,
+    fallbackEmail: string | null = null,
+  ) {
+    const email =
+      this.getNullableString(customer?.email) ??
+      fallbackEmail ??
+      `guest+shopify-${tenantId}-${orderExternalId}@pilot.local`;
+    const firstName = this.getNullableString(customer?.first_name);
+    const lastName = this.getNullableString(customer?.last_name);
+
+    return this.prisma.contact.upsert({
       where: {
-        contactId,
-        status: { in: [OrderStatus.PAID, OrderStatus.FULFILLED] },
+        tenantId_email: {
+          tenantId,
+          email: email.trim().toLowerCase(),
+        },
       },
-      select: {
-        totalAmount: true,
-        placedAt: true,
+      update: {
+        firstName: firstName ?? undefined,
+        lastName: lastName ?? undefined,
+        sourceChannel: 'shopify',
       },
-      orderBy: { placedAt: 'asc' },
-    });
-
-    const totalRevenue = paidOrders.reduce(
-      (sum, order) => sum.plus(order.totalAmount),
-      new Prisma.Decimal(0),
-    );
-
-    await this.prisma.contact.update({
-      where: { id: contactId },
-      data: {
-        totalOrders: paidOrders.length,
-        totalRevenue,
-        firstOrderAt: paidOrders[0]?.placedAt ?? null,
-        lastOrderAt: paidOrders[paidOrders.length - 1]?.placedAt ?? null,
+      create: {
+        tenantId,
+        email: email.trim().toLowerCase(),
+        firstName,
+        lastName,
+        sourceChannel: 'shopify',
       },
     });
+  }
+
+  private async resolveProductId(
+    tenantId: string,
+    item: Record<string, unknown>,
+  ): Promise<string | null> {
+    const externalId = this.getNullableString(item.product_id);
+
+    if (!externalId) {
+      return null;
+    }
+
+    const product = await this.prisma.product.findFirst({
+      where: {
+        tenantId,
+        externalId,
+        isActive: true,
+      },
+      select: { id: true },
+    });
+
+    return product?.id ?? null;
   }
 
   private asRecord(value: unknown) {

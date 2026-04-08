@@ -4,6 +4,7 @@ import { EncryptionModule } from '../../../common/services/encryption.module';
 import { PrismaModule } from '../../../database/prisma/prisma.module';
 import { QueueModule } from '../../../queue/queue.module';
 import { RedisModule } from '../../../redis/redis.module';
+import { OrdersModule } from '../../orders/orders.module';
 import { ShopifyController } from './shopify.controller';
 import { ShopifyOAuthService } from './shopify-oauth.service';
 import { ShopifyService } from './shopify.service';
@@ -14,6 +15,7 @@ import { ShopifyService } from './shopify.service';
     PrismaModule,
     EncryptionModule,
     RedisModule,
+    OrdersModule,
     forwardRef(() => QueueModule),
   ],
   controllers: [ShopifyController],

@@ -71,7 +71,7 @@ Flux principaux:
 
 ### 2. Variables d'environnement
 
-Copier `.env.example` vers `.env`, puis compl�ter les secrets.
+Copier `.env.example` vers `.env`, puis completer les secrets.
 
 ### 3. Installation locale
 
@@ -83,13 +83,13 @@ npm run build
 npm run start:dev
 ```
 
-### 4. D�marrage infra locale avec Docker
+### 4. Demarrage infra locale avec Docker
 
 ```bash
 docker compose up -d postgres redis clickhouse
 ```
 
-### 5. D�marrage complet avec Docker
+### 5. Demarrage complet avec Docker
 
 ```bash
 docker build -f infra/api.Dockerfile .
@@ -127,9 +127,9 @@ docker compose up --build
 | `GOOGLE_ADS_API_VERSION`       | Version API Google Ads               |
 | `AWS_ACCESS_KEY_ID`            | AWS SES                              |
 | `AWS_SECRET_ACCESS_KEY`        | AWS SES                              |
-| `AWS_REGION`                   | R�gion AWS                           |
+| `AWS_REGION`                   | Region AWS                           |
 | `SES_CONFIG_SET`               | Configuration set SES                |
-| `SES_FROM_DEFAULT`             | Adresse exp�diteur par d�faut        |
+| `SES_FROM_DEFAULT`             | Adresse expediteur par defaut        |
 | `SNS_TOPIC_ARN`                | Topic SNS SES                        |
 | `APP_VERSION`                  | Version applicative                  |
 | `WOOCOMMERCE_WEBHOOK_SECRET`   | Secret HMAC webhooks WooCommerce     |
@@ -365,7 +365,7 @@ Le `Dockerfile` expose:
 - `3000` pour l'API HTTP
 - `50051` pour gRPC
 
-Le `docker-compose.yml` d�marre:
+Le `docker-compose.yml` demarre:
 
 - `api`
 - `postgres`
@@ -387,7 +387,7 @@ Etapes:
 - `npm run build`
 - `npm run test:e2e`
 
-### D�ploiement script�
+### Deploiement scripte
 
 ```bash
 sh scripts/deploy.sh
@@ -397,22 +397,22 @@ Le script:
 
 - build l'application
 - applique `prisma migrate deploy`
-- redmarre PM2
+- redemarre PM2
 
 ## Audit final
 
-Vrifications executes dans ce worktree:
+Verifications executees dans ce worktree:
 
 - `npx tsc --noEmit` -> OK
 - `npm run lint` -> OK
 - `npm run build` -> OK
 - `npm run test:e2e` -> OK
-- `rg "console\.log|TODO" src test apps` -> aucun rsultat
+- `rg "console\.log|TODO" src test apps` -> aucun resultat
 
 Points notables:
 
-- Les logs d'erreurs visibles pendant les e2e proviennent de sc�narios attendus 400/401/403/404.
-- Les fallbacks copilot/narrative sont actifs quand l'agent Python n'est pas configur�.
+- Les logs d'erreurs visibles pendant les e2e proviennent de scenarios attendus 400/401/403/404.
+- Les fallbacks copilot/narrative sont actifs quand l'agent Python n'est pas configure.
 - Le workflow CI couvre lint, build et e2e sur PostgreSQL + Redis + ClickHouse.
 
 ## Roadmap semaines 1-20
@@ -431,7 +431,7 @@ Points notables:
 - S12: gRPC interne.
 - S13: WooCommerce sync + webhooks.
 - S14: embeddings pgvector.
-- S15: segments s�mantiques.
+- S15: segments semantiques.
 - S16: morning briefing Redis + narrative.
 - S17: stock alerts et campaign assist.
 - S18: copilot endpoints complets.

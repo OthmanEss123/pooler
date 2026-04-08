@@ -114,7 +114,7 @@ export class GoogleAdsService {
     );
 
     if (!clientId || !clientSecret || !redirectUri) {
-      throw new BadRequestException('Configuration OAuth incompl?te');
+      throw new BadRequestException('Configuration OAuth incomplete');
     }
 
     const body = new URLSearchParams({
@@ -142,7 +142,7 @@ export class GoogleAdsService {
 
     if (!tokens.refresh_token) {
       throw new BadRequestException(
-        'Aucun refresh_token re?u. V?rifie prompt=consent et access_type=offline.',
+        'Aucun refresh_token recu. Verifie prompt=consent et access_type=offline.',
       );
     }
 
@@ -151,7 +151,7 @@ export class GoogleAdsService {
       tenantId,
       refreshToken: tokens.refresh_token,
       message:
-        'Refresh token r?cup?r?. Le customerId doit ?tre fourni s?par?ment pour connecter le compte Google Ads.',
+        'Refresh token recupere. Le customerId doit etre fourni separement pour connecter le compte Google Ads.',
     };
   }
 
@@ -310,7 +310,7 @@ export class GoogleAdsService {
 
     if (normalizedDateFrom > normalizedDateTo) {
       throw new BadRequestException(
-        'dateFrom doit ?tre ant?rieure ou ?gale ? dateTo',
+        'dateFrom doit etre anterieure ou egale a dateTo',
       );
     }
 
@@ -700,7 +700,7 @@ export class GoogleAdsService {
     });
 
     if (!integration) {
-      throw new NotFoundException('Int?gration Google Ads introuvable');
+      throw new NotFoundException('Integration Google Ads introuvable');
     }
 
     return integration;
@@ -710,7 +710,7 @@ export class GoogleAdsService {
     const integration = await this.getIntegration(tenantId);
 
     if (integration.status !== IntegrationStatus.ACTIVE) {
-      throw new BadRequestException('Int?gration Google Ads inactive');
+      throw new BadRequestException('Integration Google Ads inactive');
     }
 
     return integration;
@@ -731,7 +731,7 @@ export class GoogleAdsService {
     const clientSecret = this.configService.get<string>('GOOGLE_CLIENT_SECRET');
 
     if (!clientId || !clientSecret) {
-      throw new BadRequestException('Configuration OAuth incompl?te');
+      throw new BadRequestException('Configuration OAuth incomplete');
     }
 
     const body = new URLSearchParams({
@@ -752,7 +752,7 @@ export class GoogleAdsService {
     if (!response.ok) {
       const errorText = await response.text();
       throw new BadRequestException(
-        `Impossible de r?cup?rer access_token: ${errorText}`,
+        `Impossible de recuperer access_token: ${errorText}`,
       );
     }
 
