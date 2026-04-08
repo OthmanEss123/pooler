@@ -3,6 +3,7 @@ import { PrismaModule } from '../../database/prisma/prisma.module';
 import { BillingModule } from '../billing/billing.module';
 import { FlowsModule } from '../flows/flows.module';
 import { ContactsController } from './contacts.controller';
+import { ContactsImportService } from './contacts-import.service';
 import { ContactsService } from './contacts.service';
 import { EmbeddingsService } from './embeddings.service';
 import { SuppressionListController } from './suppression-list.controller';
@@ -14,12 +15,14 @@ import { SuppressionsService } from './suppressions.service';
   controllers: [ContactsController, SuppressionListController],
   providers: [
     ContactsService,
+    ContactsImportService,
     SuppressionsService,
     EmbeddingsService,
     SuppressionListService,
   ],
   exports: [
     ContactsService,
+    ContactsImportService,
     SuppressionsService,
     EmbeddingsService,
     SuppressionListService,

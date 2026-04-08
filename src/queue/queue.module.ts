@@ -7,7 +7,9 @@ import { AnalyticsModule } from '../modules/analytics/analytics.module';
 import { EmailEventsModule } from '../modules/email-events/email-events.module';
 import { EmailProviderModule } from '../modules/email-provider/email-provider.module';
 import { FlowsModule } from '../modules/flows/flows.module';
+import { FacebookAdsModule } from '../modules/integrations/facebook-ads/facebook-ads.module';
 import { GoogleAdsModule } from '../modules/integrations/google-ads/google-ads.module';
+import { ShopifyModule } from '../modules/integrations/shopify/shopify.module';
 import { WooCommerceModule } from '../modules/integrations/woocommerce/woocommerce.module';
 import { QueueEventsService } from './queue-events.service';
 import { QueueHealthService } from './queue-health.service';
@@ -27,6 +29,8 @@ const queueEnabled = process.env.QUEUE_ENABLED !== 'false';
     PrismaModule,
     forwardRef(() => FlowsModule),
     forwardRef(() => GoogleAdsModule),
+    forwardRef(() => FacebookAdsModule),
+    forwardRef(() => ShopifyModule),
     forwardRef(() => WooCommerceModule),
     ...(queueEnabled
       ? [

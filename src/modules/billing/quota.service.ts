@@ -10,10 +10,10 @@ export class QuotaService {
     private readonly billingService: BillingService,
   ) {}
 
-  async checkContactLimit(tenantId: string) {
+  async checkContactLimit(tenantId: string, additionalCount = 1) {
     const usage = await this.billingService.getUsage(tenantId);
 
-    if (usage.contacts.used >= usage.contacts.limit) {
+    if (usage.contacts.used + additionalCount > usage.contacts.limit) {
       throw new ForbiddenException(
         `Limite de contacts atteinte pour le plan ${usage.plan}`,
       );

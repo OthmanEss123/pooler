@@ -27,6 +27,7 @@ import { EmailProviderModule } from './modules/email-provider/email-provider.mod
 import { FlowsModule } from './modules/flows/flows.module';
 import { HealthModule } from './modules/health/health.module';
 import { InsightsModule } from './modules/insights/insights.module';
+import { FacebookAdsModule } from './modules/integrations/facebook-ads/facebook-ads.module';
 import { Ga4Module } from './modules/integrations/ga4/ga4.module';
 import { GoogleAdsModule } from './modules/integrations/google-ads/google-ads.module';
 import { ShopifyModule } from './modules/integrations/shopify/shopify.module';
@@ -96,6 +97,7 @@ const nodeEnv = process.env.NODE_ENV ?? 'development';
     MetricsModule,
     Ga4Module,
     GoogleAdsModule,
+    FacebookAdsModule,
     ShopifyModule,
     WooCommerceModule,
     ScheduleModule.forRoot(),

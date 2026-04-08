@@ -19,6 +19,10 @@ class CreateOrderItemDto {
   @IsNotEmpty()
   name!: string;
 
+  @IsOptional()
+  @IsString()
+  productId?: string;
+
   @Type(() => Number)
   @IsNumber()
   @Min(1)

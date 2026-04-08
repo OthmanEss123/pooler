@@ -176,7 +176,7 @@ export class WooCommerceService {
       }
 
       const url = `${credentials.siteUrl}/wp-json/wc/v3/orders?${params.toString()}`;
-      const response = await fetch(url, {
+      const response = await this.wooFetch(url, {
         method: 'GET',
         headers,
       });
@@ -226,7 +226,7 @@ export class WooCommerceService {
         page: String(page),
       });
       const url = `${credentials.siteUrl}/wp-json/wc/v3/products?${params.toString()}`;
-      const response = await fetch(url, {
+      const response = await this.wooFetch(url, {
         method: 'GET',
         headers,
       });
@@ -374,6 +374,8 @@ export class WooCommerceService {
     const category = this.extractCategory(wcProduct.categories);
     const tags = this.extractTags(wcProduct.tags);
     const isActive = this.getString(wcProduct.status) === 'publish';
+    const stockQuantity = this.parseNullableInteger(wcProduct.stock_quantity);
+    const trackStock = this.getString(wcProduct.manage_stock) === 'true';
 
     return this.prisma.product.upsert({
       where: {
@@ -389,6 +391,8 @@ export class WooCommerceService {
         imageUrl,
         category,
         tags,
+        stockQuantity,
+        trackStock,
         isActive,
         rawPayload: toInputJsonValue(wcProduct),
       },
@@ -401,6 +405,8 @@ export class WooCommerceService {
         imageUrl,
         category,
         tags,
+        stockQuantity,
+        trackStock,
         isActive,
         rawPayload: toInputJsonValue(wcProduct),
       },
@@ -576,7 +582,29 @@ export class WooCommerceService {
     return siteUrl.replace(/\/+$/, '');
   }
 
-  private mapOrderStatus(wcStatus: string): OrderStatus {
+  private async wooFetch(
+    url: string,
+    options: RequestInit,
+    retries = 3,
+  ): Promise<Response> {
+    const res = await fetch(url, options);
+
+    if (res.status === 429 && retries > 0) {
+      const retryAfter = Number.parseInt(
+        res.headers.get('Retry-After') ?? '2',
+        10,
+      );
+      this.logger.warn(
+        `WooCommerce 429 - retry in ${retryAfter}s (${retries} remaining)`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, retryAfter * 1000));
+      return this.wooFetch(url, options, retries - 1);
+    }
+
+    return res;
+  }
+
+  mapOrderStatus(wcStatus: string): OrderStatus {
     switch (wcStatus) {
       case 'pending':
       case 'on-hold':
@@ -636,6 +664,14 @@ export class WooCommerceService {
     return Number.isFinite(parsed) ? parsed : fallback;
   }
 
+  private parseNullableInteger(value: unknown): number | null {
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+
+    const parsed = Number(this.getString(value));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
   private parseDecimal(value: unknown): Prisma.Decimal {
     const numeric =
       typeof value === 'string' || typeof value === 'number'

@@ -18,6 +18,7 @@ import { ProductsService } from './products.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { QueryProductsDto } from './dto/query-products.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+import { UpdateProductStockDto } from './dto/update-product-stock.dto';
 
 @UseGuards(RolesGuard)
 @Controller('products')
@@ -29,6 +30,12 @@ export class ProductsController {
     return this.productsService.findAll(tenantId, query);
   }
 
+  @Get('low-stock')
+  @Roles('OWNER', 'ADMIN')
+  getLowStock(@CurrentTenant() tenantId: string) {
+    return this.productsService.findLowStock(tenantId);
+  }
+
   @Get(':id')
   findOne(@CurrentTenant() tenantId: string, @Param('id') id: string) {
     return this.productsService.findOne(tenantId, id);
@@ -38,6 +45,16 @@ export class ProductsController {
   @Roles('OWNER', 'ADMIN')
   create(@CurrentTenant() tenantId: string, @Body() dto: CreateProductDto) {
     return this.productsService.create(tenantId, dto);
+  }
+
+  @Patch(':id/stock')
+  @Roles('OWNER', 'ADMIN')
+  updateStock(
+    @CurrentTenant() tenantId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateProductStockDto,
+  ) {
+    return this.productsService.updateStock(tenantId, id, dto);
   }
 
   @Patch(':id')

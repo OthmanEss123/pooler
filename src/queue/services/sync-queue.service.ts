@@ -18,6 +18,10 @@ export interface SyncWoocommercePayload {
   full: boolean;
 }
 
+export interface SyncFacebookAdsPayload {
+  tenantId: string;
+}
+
 export interface SyncSegmentPayload {
   tenantId: string;
   segmentId: string;
@@ -84,6 +88,19 @@ export class SyncQueueService {
         removeOnComplete: 100,
         removeOnFail: 100,
       },
+    );
+  }
+
+  async syncFacebookAds(tenantId: string) {
+    if (!this.queueEnabled || !this.syncQueue) {
+      this.logger.log(`[QUEUE_DISABLED] syncFacebookAds ignored: ${tenantId}`);
+      return;
+    }
+
+    return this.syncQueue.add(
+      'sync-facebook-ads',
+      { tenantId },
+      { attempts: 3 },
     );
   }
 

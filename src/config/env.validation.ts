@@ -58,6 +58,10 @@ export const envValidation = Joi.object({
   GOOGLE_ADS_LOGIN_CUSTOMER_ID: Joi.string().allow('').optional(),
   GOOGLE_ADS_API_VERSION: Joi.string().default('v22'),
 
+  FACEBOOK_APP_ID: Joi.string().allow('').optional(),
+  FACEBOOK_APP_SECRET: Joi.string().allow('').optional(),
+  FACEBOOK_REDIRECT_URI: Joi.string().allow('').optional(),
+
   ANTHROPIC_API_KEY: Joi.string().allow('').optional(),
   NARRATIVE_AGENT_URL: Joi.string().allow('').optional(),
   FORECAST_AGENT_URL: Joi.string().allow('').optional(),

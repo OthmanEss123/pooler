@@ -9,5 +9,8 @@
   },
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"
-  }
+  },
+  "transformIgnorePatterns": [
+    "node_modules/(?!(@scure|otplib|@otplib|@noble)/)"
+  ]
 }

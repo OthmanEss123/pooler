@@ -17,6 +17,7 @@ import { PrismaService } from '../../database/prisma/prisma.service';
 import { EmailProviderService } from '../email-provider/email-provider.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { MfaService } from './services/mfa.service';
 import type { JwtPayload } from './strategies/jwt.strategy';
 
 interface AuthAuditContext {
@@ -38,6 +39,7 @@ export class AuthService {
     private readonly auditService: AuditService,
     private readonly configService: ConfigService,
     private readonly emailProvider: EmailProviderService,
+    private readonly mfaService: MfaService,
   ) {
     this.frontendUrl = this.configService.get<string>(
       'FRONTEND_URL',
@@ -188,6 +190,96 @@ export class AuthService {
 
     if (!isValid) {
       throw new UnauthorizedException('Invalid credentials');
+    }
+
+    if (user.mfaEnabled) {
+      return {
+        requiresMfa: true as const,
+        mfaTempToken: await this.jwtService.signAsync(
+          {
+            sub: user.id,
+            tenantId: user.tenantId,
+            email: user.email,
+            type: 'mfa_temp',
+          },
+          {
+            secret: this.configService.getOrThrow<string>('JWT_SECRET'),
+            expiresIn: '5m',
+          },
+        ),
+      };
+    }
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date() },
+    });
+
+    const tokens = await this.generateTokens(
+      user.id,
+      user.tenantId,
+      user.email,
+      user.role,
+      user.emailVerified,
+    );
+
+    this.recordSuccessfulLogin(user, auditContext);
+
+    return {
+      user: this.sanitizeUser(user),
+      ...tokens,
+    };
+  }
+
+  async setupMfa(userId: string) {
+    return this.mfaService.generateSecret(userId);
+  }
+
+  async enableMfa(userId: string, token: string) {
+    return this.mfaService.enable(userId, token);
+  }
+
+  async disableMfa(userId: string, token: string, password: string) {
+    return this.mfaService.disable(userId, token, password);
+  }
+
+  async verifyMfaLogin(
+    mfaTempToken: string,
+    totpCode: string,
+    auditContext?: AuthAuditContext,
+  ) {
+    let payload: {
+      sub: string;
+      tenantId: string;
+      email: string;
+      type?: string;
+    };
+
+    try {
+      payload = await this.jwtService.verifyAsync(mfaTempToken, {
+        secret: this.configService.getOrThrow<string>('JWT_SECRET'),
+      });
+    } catch {
+      throw new UnauthorizedException('Invalid MFA token');
+    }
+
+    if (payload.type !== 'mfa_temp') {
+      throw new UnauthorizedException('Invalid MFA token');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+      include: { tenant: true },
+    });
+
+    if (!user || !user.isActive || !user.tenant.isActive || !user.mfaEnabled) {
+      throw new UnauthorizedException('Invalid MFA token');
+    }
+
+    const isValid = await this.mfaService.verifyToken(user.id, totpCode);
+
+    if (!isValid) {
+      throw new UnauthorizedException('Invalid MFA code');
     }
 
     await this.prisma.user.update({

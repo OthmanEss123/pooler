@@ -4,6 +4,7 @@ import { PrismaService } from '../../database/prisma/prisma.service';
 import { SuppressionsService } from '../contacts/suppressions.service';
 import { FlowTriggerType } from '../flows/dto/create-flow.dto';
 import { FlowsService } from '../flows/flows.service';
+import { ProductsService } from '../products/products.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { QueryOrdersDto } from './dto/query-orders.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
@@ -21,6 +22,7 @@ export class OrdersService {
     private readonly prisma: PrismaService,
     private readonly flowsService: FlowsService,
     private readonly suppressionsService: SuppressionsService,
+    private readonly productsService: ProductsService,
   ) {}
 
   async create(tenantId: string, dto: CreateOrderDto) {
@@ -31,6 +33,34 @@ export class OrdersService {
         dto.contactEmail,
       );
       const externalId = dto.externalId ?? this.buildExternalId(tenantId);
+      const productsById = new Map<
+        string,
+        { id: string; externalId: string }
+      >();
+
+      for (const item of dto.items) {
+        if (!item.productId || productsById.has(item.productId)) {
+          continue;
+        }
+
+        const product = await tx.product.findFirst({
+          where: {
+            id: item.productId,
+            tenantId,
+            isActive: true,
+          },
+          select: {
+            id: true,
+            externalId: true,
+          },
+        });
+
+        if (!product) {
+          throw new NotFoundException(`Produit ${item.productId} introuvable`);
+        }
+
+        productsById.set(item.productId, product);
+      }
 
       const order = await tx.order.create({
         data: {
@@ -52,18 +82,38 @@ export class OrdersService {
 
       if (dto.items.length > 0) {
         await tx.orderItem.createMany({
-          data: dto.items.map((item, index) => ({
-            tenantId,
-            orderId: order.id,
-            externalId: `${externalId}-item-${index + 1}`,
-            productExternalId: null,
-            name: item.name,
-            sku: null,
-            quantity: item.quantity,
-            unitPrice: new Prisma.Decimal(item.unitPrice),
-            totalPrice: new Prisma.Decimal(item.totalPrice),
-          })),
+          data: dto.items.map((item, index) => {
+            const product = item.productId
+              ? (productsById.get(item.productId) ?? null)
+              : null;
+
+            return {
+              tenantId,
+              orderId: order.id,
+              externalId: `${externalId}-item-${index + 1}`,
+              productId: product?.id ?? null,
+              productExternalId: product?.externalId ?? null,
+              name: item.name,
+              sku: null,
+              quantity: item.quantity,
+              unitPrice: new Prisma.Decimal(item.unitPrice),
+              totalPrice: new Prisma.Decimal(item.totalPrice),
+            };
+          }),
         });
+
+        for (const item of dto.items) {
+          if (!item.productId) {
+            continue;
+          }
+
+          await this.productsService.decrementStock(
+            tenantId,
+            item.productId,
+            item.quantity,
+            tx,
+          );
+        }
       }
 
       await this.recalculateContactMetrics(tx, contact.id);

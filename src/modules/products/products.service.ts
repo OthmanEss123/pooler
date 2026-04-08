@@ -1,13 +1,16 @@
 import {
+  ConflictException,
   Injectable,
   NotFoundException,
-  ConflictException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { InsightType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma/prisma.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { QueryProductsDto } from './dto/query-products.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+import { UpdateProductStockDto } from './dto/update-product-stock.dto';
+
+type PrismaLike = PrismaService | Prisma.TransactionClient;
 
 @Injectable()
 export class ProductsService {
@@ -59,6 +62,26 @@ export class ProductsService {
     return { data, total, limit: query.limit, offset: query.offset };
   }
 
+  async findLowStock(tenantId: string) {
+    const products = await this.prisma.product.findMany({
+      where: {
+        tenantId,
+        isActive: true,
+        trackStock: true,
+        stockQuantity: { not: null },
+        lowStockAlert: { not: null },
+      },
+      orderBy: [{ stockQuantity: 'asc' }, { createdAt: 'desc' }],
+    });
+
+    return products.filter(
+      (product) =>
+        product.stockQuantity !== null &&
+        product.lowStockAlert !== null &&
+        product.stockQuantity <= product.lowStockAlert,
+    );
+  }
+
   async findOne(tenantId: string, id: string) {
     const product = await this.prisma.product.findFirst({
       where: { id, tenantId, isActive: true },
@@ -76,6 +99,53 @@ export class ProductsService {
     return this.prisma.product.update({ where: { id }, data: dto });
   }
 
+  async updateStock(tenantId: string, id: string, dto: UpdateProductStockDto) {
+    await this.findOne(tenantId, id);
+
+    const product = await this.prisma.product.update({
+      where: { id },
+      data: {
+        stockQuantity: dto.stockQuantity,
+        lowStockAlert: dto.lowStockAlert,
+        ...(dto.trackStock === undefined ? {} : { trackStock: dto.trackStock }),
+      },
+    });
+
+    await this.createLowStockInsightIfNeeded(tenantId, product, this.prisma);
+
+    return product;
+  }
+
+  async decrementStock(
+    tenantId: string,
+    productId: string,
+    quantity: number,
+    client: PrismaLike = this.prisma,
+  ) {
+    const product = await client.product.findFirst({
+      where: { id: productId, tenantId, isActive: true },
+    });
+
+    if (!product) {
+      throw new NotFoundException(`Produit ${productId} introuvable`);
+    }
+
+    if (!product.trackStock) {
+      return product;
+    }
+
+    const nextQuantity = Math.max((product.stockQuantity ?? 0) - quantity, 0);
+
+    const updated = await client.product.update({
+      where: { id: product.id },
+      data: { stockQuantity: nextQuantity },
+    });
+
+    await this.createLowStockInsightIfNeeded(tenantId, updated, client);
+
+    return updated;
+  }
+
   async remove(tenantId: string, id: string): Promise<void> {
     await this.findOne(tenantId, id);
     await this.prisma.product.update({
@@ -91,6 +161,59 @@ export class ProductsService {
       },
       update: dto,
       create: { tenantId, ...dto },
+    });
+  }
+
+  private async createLowStockInsightIfNeeded(
+    tenantId: string,
+    product: {
+      id: string;
+      name: string;
+      sku: string | null;
+      stockQuantity: number | null;
+      lowStockAlert: number | null;
+      trackStock: boolean;
+    },
+    client: PrismaLike,
+  ) {
+    if (
+      !product.trackStock ||
+      product.stockQuantity === null ||
+      product.lowStockAlert === null ||
+      product.stockQuantity > product.lowStockAlert
+    ) {
+      return;
+    }
+
+    const title = `Stock faible - ${product.name}`;
+    const recentThreshold = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const existing = await client.insight.findFirst({
+      where: {
+        tenantId,
+        type: InsightType.ANOMALY,
+        title,
+        createdAt: { gte: recentThreshold },
+      },
+    });
+
+    if (existing) {
+      return;
+    }
+
+    await client.insight.create({
+      data: {
+        tenantId,
+        type: InsightType.ANOMALY,
+        title,
+        description: `Stock quantity ${product.stockQuantity} is at or below alert threshold ${product.lowStockAlert}.`,
+        data: {
+          productId: product.id,
+          sku: product.sku,
+          stockQuantity: product.stockQuantity,
+          lowStockAlert: product.lowStockAlert,
+        },
+      },
     });
   }
 }

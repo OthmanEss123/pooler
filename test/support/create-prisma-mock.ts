@@ -1,10 +1,14 @@
 /* eslint-disable @typescript-eslint/require-await, @typescript-eslint/no-unnecessary-type-assertion */
 import {
+  AdCampaignStatus,
+  AdCampaignType,
   ApiKeyScope,
   BillingPlan,
   BillingSubscriptionStatus,
   EmailStatus,
   InsightType,
+  IntegrationStatus,
+  IntegrationType,
   SegmentType,
   UserRole,
 } from '@prisma/client';
@@ -255,6 +259,28 @@ const matchesContactWhere = (
     return false;
   }
 
+  if (where.id && contact.id !== where.id) {
+    return false;
+  }
+
+  if (where.email !== undefined) {
+    if (typeof where.email === 'string' && contact.email !== where.email) {
+      return false;
+    }
+
+    if (
+      typeof where.email === 'object' &&
+      where.email !== null &&
+      'in' in where.email
+    ) {
+      const emails = (where.email as { in: string[] }).in;
+
+      if (!emails.includes(contact.email)) {
+        return false;
+      }
+    }
+  }
+
   if (
     Array.isArray(where.AND) &&
     !(where.AND as Record<string, unknown>[]).every((item) =>
@@ -349,6 +375,35 @@ export const createPrismaMock = () => {
   const adAudienceMembers: MockAdAudienceMember[] = [];
   const billingSubscriptions: MockBillingSubscription[] = [];
   const insights: MockInsight[] = [];
+  const integrations: Array<{
+    id: string;
+    tenantId: string;
+    type: IntegrationType;
+    status: IntegrationStatus;
+    credentials: string | null;
+    metadata: unknown;
+    lastSyncAt: Date | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }> = [];
+  const adCampaigns: Array<{
+    id: string;
+    tenantId: string;
+    externalId: string;
+    name: string;
+    type: AdCampaignType;
+    status: AdCampaignStatus;
+    budgetDaily: number | null;
+    spend: number;
+    impressions: number;
+    clicks: number;
+    conversions: number;
+    conversionValue: number;
+    roas: number;
+    syncedAt: Date | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }> = [];
 
   let tenantCounter = 1;
   let userCounter = 1;
@@ -360,6 +415,8 @@ export const createPrismaMock = () => {
   let adAudienceCounter = 1;
   let billingSubscriptionCounter = 1;
   let insightCounter = 1;
+  let integrationCounter = 1;
+  let adCampaignCounter = 1;
 
   const seedContactsForTenant = (tenantId: string) => {
     const now = new Date();
@@ -1324,6 +1381,141 @@ export const createPrismaMock = () => {
           );
         },
       ),
+      findFirst: jest.fn(
+        async ({ where }: { where?: Record<string, unknown> }) => {
+          return (
+            contacts.find((candidate) =>
+              matchesContactWhere(candidate, where),
+            ) ?? null
+          );
+        },
+      ),
+      create: jest.fn(
+        async ({
+          data,
+        }: {
+          data: {
+            tenantId: string;
+            email: string;
+            firstName?: string | null;
+            lastName?: string | null;
+            phone?: string | null;
+          };
+        }) => {
+          const now = new Date();
+          const email = data.email.trim().toLowerCase();
+          const contact: MockContact = {
+            id: `contact-${contactCounter++}`,
+            tenantId: data.tenantId,
+            email,
+            firstName: data.firstName ?? null,
+            lastName: data.lastName ?? null,
+            phone: data.phone ?? null,
+            sourceChannel: null,
+            properties: null,
+            emailStatus: EmailStatus.PENDING,
+            totalRevenue: 0,
+            totalOrders: 0,
+            firstOrderAt: null,
+            lastOrderAt: null,
+            healthScore: null,
+            createdAt: now,
+            updatedAt: now,
+          };
+
+          contacts.push(contact);
+          return contact;
+        },
+      ),
+      createMany: jest.fn(
+        async ({
+          data,
+          skipDuplicates,
+        }: {
+          data: Array<{
+            tenantId: string;
+            email: string;
+            firstName?: string | null;
+            lastName?: string | null;
+            phone?: string | null;
+            sourceChannel?: string | null;
+            emailStatus?: EmailStatus;
+            totalRevenue?: unknown;
+            properties?: unknown;
+          }>;
+          skipDuplicates?: boolean;
+        }) => {
+          let count = 0;
+
+          for (const row of data) {
+            const exists = contacts.some(
+              (candidate) =>
+                candidate.tenantId === row.tenantId &&
+                candidate.email === row.email,
+            );
+
+            if (exists && skipDuplicates) {
+              continue;
+            }
+
+            const now = new Date();
+            const totalRev =
+              row.totalRevenue !== undefined && row.totalRevenue !== null
+                ? Number(row.totalRevenue)
+                : 0;
+
+            contacts.push({
+              id: `contact-${contactCounter++}`,
+              tenantId: row.tenantId,
+              email: row.email,
+              firstName: row.firstName ?? null,
+              lastName: row.lastName ?? null,
+              phone: row.phone ?? null,
+              sourceChannel: row.sourceChannel ?? null,
+              properties: row.properties ?? null,
+              emailStatus: row.emailStatus ?? EmailStatus.PENDING,
+              totalRevenue: totalRev,
+              totalOrders: 0,
+              firstOrderAt: null,
+              lastOrderAt: null,
+              healthScore: null,
+              createdAt: now,
+              updatedAt: now,
+            });
+            count += 1;
+          }
+
+          return { count };
+        },
+      ),
+      update: jest.fn(
+        async ({
+          where,
+          data,
+        }: {
+          where: { id: string };
+          data: Record<string, unknown>;
+        }) => {
+          const contact = contacts.find(
+            (candidate) => candidate.id === where.id,
+          );
+
+          if (!contact) {
+            throw new Error('Contact not found');
+          }
+
+          const next = { ...contact, updatedAt: new Date() };
+
+          for (const [key, value] of Object.entries(data)) {
+            if (value !== undefined) {
+              (next as Record<string, unknown>)[key] = value;
+            }
+          }
+
+          Object.assign(contact, next);
+          return contact;
+        },
+      ),
     },
     segment: {
       findFirst: jest.fn(
@@ -1666,6 +1858,189 @@ export const createPrismaMock = () => {
           }
 
           return audience;
+        },
+      ),
+    },
+    integration: {
+      findUnique: jest.fn(
+        async ({
+          where,
+        }: {
+          where: {
+            tenantId_type?: { tenantId: string; type: IntegrationType };
+          };
+        }) => {
+          if (!where.tenantId_type) {
+            return null;
+          }
+
+          return (
+            integrations.find(
+              (candidate) =>
+                candidate.tenantId === where.tenantId_type!.tenantId &&
+                candidate.type === where.tenantId_type!.type,
+            ) ?? null
+          );
+        },
+      ),
+      upsert: jest.fn(
+        async ({
+          where,
+          create,
+          update,
+        }: {
+          where: { tenantId_type: { tenantId: string; type: IntegrationType } };
+          create: {
+            tenantId: string;
+            type: IntegrationType;
+            status: IntegrationStatus;
+            credentials: string | null;
+            metadata?: unknown;
+          };
+          update: {
+            status?: IntegrationStatus;
+            credentials?: string | null;
+            metadata?: unknown;
+            lastSyncAt?: Date | null;
+          };
+        }) => {
+          const existing = integrations.find(
+            (candidate) =>
+              candidate.tenantId === where.tenantId_type.tenantId &&
+              candidate.type === where.tenantId_type.type,
+          );
+          const now = new Date();
+
+          if (existing) {
+            Object.assign(existing, update, { updatedAt: now });
+            return existing;
+          }
+
+          const row = {
+            id: `integration-${integrationCounter++}`,
+            tenantId: create.tenantId,
+            type: create.type,
+            status: create.status,
+            credentials: create.credentials,
+            metadata: create.metadata ?? null,
+            lastSyncAt: null as Date | null,
+            createdAt: now,
+            updatedAt: now,
+          };
+
+          integrations.push(row);
+          return row;
+        },
+      ),
+      update: jest.fn(
+        async ({
+          where,
+          data,
+        }: {
+          where:
+            | { id: string }
+            | {
+                tenantId_type: { tenantId: string; type: IntegrationType };
+              };
+          data: {
+            status?: IntegrationStatus;
+            credentials?: string | null;
+            metadata?: unknown;
+            lastSyncAt?: Date | null;
+          };
+        }) => {
+          const row =
+            'id' in where
+              ? integrations.find((candidate) => candidate.id === where.id)
+              : integrations.find(
+                  (candidate) =>
+                    candidate.tenantId === where.tenantId_type.tenantId &&
+                    candidate.type === where.tenantId_type.type,
+                );
+          if (!row) {
+            throw new Error('Integration not found');
+          }
+
+          Object.assign(row, data, { updatedAt: new Date() });
+          return row;
+        },
+      ),
+    },
+    adCampaign: {
+      findMany: jest.fn(
+        async ({
+          where,
+          orderBy,
+        }: {
+          where?: { tenantId?: string };
+          orderBy?: { updatedAt?: 'asc' | 'desc' };
+        }) => {
+          const filtered = adCampaigns.filter((candidate) => {
+            if (where?.tenantId && candidate.tenantId !== where.tenantId) {
+              return false;
+            }
+
+            return true;
+          });
+
+          filtered.sort((left, right) =>
+            orderBy?.updatedAt === 'asc'
+              ? left.updatedAt.getTime() - right.updatedAt.getTime()
+              : right.updatedAt.getTime() - left.updatedAt.getTime(),
+          );
+
+          return filtered;
+        },
+      ),
+      upsert: jest.fn(
+        async ({
+          where,
+          create,
+          update,
+        }: {
+          where: {
+            tenantId_externalId: { tenantId: string; externalId: string };
+          };
+          create: Record<string, unknown>;
+          update: Record<string, unknown>;
+        }) => {
+          const existing = adCampaigns.find(
+            (candidate) =>
+              candidate.tenantId === where.tenantId_externalId.tenantId &&
+              candidate.externalId === where.tenantId_externalId.externalId,
+          );
+          const now = new Date();
+
+          if (existing) {
+            Object.assign(existing, update, { updatedAt: now });
+            return existing;
+          }
+
+          const row = {
+            id: `adcampaign-${adCampaignCounter++}`,
+            tenantId: where.tenantId_externalId.tenantId,
+            externalId: where.tenantId_externalId.externalId,
+            name: typeof create.name === 'string' ? create.name : 'Campaign',
+            type: (create.type as AdCampaignType) ?? AdCampaignType.SEARCH,
+            status:
+              (create.status as AdCampaignStatus) ?? AdCampaignStatus.ENABLED,
+            budgetDaily:
+              create.budgetDaily !== undefined && create.budgetDaily !== null
+                ? Number(create.budgetDaily)
+                : null,
+            spend: Number(create.spend ?? 0),
+            impressions: Number(create.impressions ?? 0),
+            clicks: Number(create.clicks ?? 0),
+            conversions: Number(create.conversions ?? 0),
+            conversionValue: Number(create.conversionValue ?? 0),
+            roas: Number(create.roas ?? 0),
+            syncedAt: (create.syncedAt as Date | null) ?? null,
+            createdAt: now,
+            updatedAt: now,
+          };
+
+          adCampaigns.push(row);
+          return row;
         },
       ),
     },

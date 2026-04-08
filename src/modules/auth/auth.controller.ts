@@ -23,9 +23,12 @@ import type {
 } from '../../common/types/auth-request';
 import { AuthService } from './auth.service';
 import { CreateApiKeyDto } from './dto/create-api-key.dto';
+import { DisableMfaDto } from './dto/disable-mfa.dto';
+import { EnableMfaDto } from './dto/enable-mfa.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { SwitchTenantDto } from './dto/switch-tenant.dto';
+import { VerifyMfaDto } from './dto/verify-mfa.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -77,6 +80,10 @@ export class AuthController {
       userAgent: req.get('user-agent') ?? null,
     });
 
+    if ('requiresMfa' in result && result.requiresMfa) {
+      return result;
+    }
+
     this.setAuthCookies(
       res,
       result.accessToken,
@@ -87,6 +94,71 @@ export class AuthController {
     return {
       user: result.user,
     };
+  }
+
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Post('mfa/verify')
+  async verifyMfa(
+    @Body() dto: VerifyMfaDto,
+    @Req() req: AuthRequest,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.authService.verifyMfaLogin(
+      dto.mfaTempToken,
+      dto.totpCode,
+      {
+        requestId: req.requestId,
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent') ?? null,
+      },
+    );
+
+    this.setAuthCookies(
+      res,
+      result.accessToken,
+      result.refreshToken,
+      result.tokenFamily,
+    );
+
+    return { user: result.user };
+  }
+
+  @Post('mfa/setup')
+  @HttpCode(HttpStatus.OK)
+  async setupMfa(@CurrentUser() user: AuthenticatedUser) {
+    if (!user.id) {
+      throw new UnauthorizedException('User token required');
+    }
+
+    const result = await this.authService.setupMfa(user.id);
+    return { qrCodeUrl: result.qrCodeUrl };
+  }
+
+  @Post('mfa/enable')
+  @HttpCode(HttpStatus.OK)
+  async enableMfa(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: EnableMfaDto,
+  ) {
+    if (!user.id) {
+      throw new UnauthorizedException('User token required');
+    }
+
+    return this.authService.enableMfa(user.id, dto.token);
+  }
+
+  @Post('mfa/disable')
+  @HttpCode(HttpStatus.OK)
+  async disableMfa(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: DisableMfaDto,
+  ) {
+    if (!user.id) {
+      throw new UnauthorizedException('User token required');
+    }
+
+    return this.authService.disableMfa(user.id, dto.token, dto.password);
   }
 
   @Public()

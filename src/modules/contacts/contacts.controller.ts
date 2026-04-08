@@ -6,17 +6,23 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseFilePipeBuilder,
   Patch,
   Post,
   Query,
   Res,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { CurrentTenant } from '../../common/decorators/current-tenant.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { ContactsImportService } from './contacts-import.service';
 import { ContactsService } from './contacts.service';
 import { EmbeddingsService } from './embeddings.service';
 import { SuppressionsService } from './suppressions.service';
@@ -31,13 +37,45 @@ import { UpdateContactDto } from './dto/update-contact.dto';
 export class ContactsController {
   constructor(
     private readonly contactsService: ContactsService,
+    private readonly contactsImportService: ContactsImportService,
     private readonly suppressionsService: SuppressionsService,
     private readonly embeddingsService: EmbeddingsService,
   ) {}
 
+  @Get('import/template')
+  @Public()
+  getImportTemplate(@Res({ passthrough: true }) res: Response) {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename=contacts-import-template.csv',
+    );
+    return this.contactsImportService.getTemplate();
+  }
+
   @Get()
   findAll(@CurrentTenant() tenantId: string, @Query() query: QueryContactsDto) {
     return this.contactsService.findAll(tenantId, query);
+  }
+
+  @Post('import')
+  @Roles('OWNER', 'ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  importCsv(
+    @CurrentTenant() tenantId: string,
+    @UploadedFile(
+      new ParseFilePipeBuilder()
+        .addMaxSizeValidator({ maxSize: 10 * 1024 * 1024 })
+        .build({ errorHttpStatusCode: HttpStatus.PAYLOAD_TOO_LARGE }),
+    )
+    file: Express.Multer.File,
+  ) {
+    return this.contactsImportService.importFromCsv(tenantId, file.buffer);
   }
 
   @Get('export')
