@@ -16,6 +16,11 @@ interface ParsedContact {
   totalRevenue?: number;
 }
 
+interface ParseResult {
+  contacts: ParsedContact[];
+  errors: string[];
+}
+
 export interface ImportResult {
   imported: number;
   updated: number;
@@ -32,26 +37,24 @@ export class ContactsImportService {
     private readonly quota: QuotaService,
   ) {}
 
-  // ── Parser CSV ────────────────────────────────────
-  async parseCsv(buffer: Buffer): Promise<ParsedContact[]> {
-    // Supprimer BOM UTF-8
+  async parseCsv(buffer: Buffer): Promise<ParseResult> {
     const clean =
       buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf
         ? buffer.slice(3)
         : buffer;
 
     return new Promise((resolve, reject) => {
-      const results: ParsedContact[] = [];
+      const contacts: ParsedContact[] = [];
       const errors: string[] = [];
-      let headers: string[] = [];
 
-      const stream = Readable.from(clean);
-
-      stream
+      Readable.from(clean)
         .pipe(csv())
-        .on('headers', (h: string[]) => {
-          headers = h.map((x) => x.trim().toLowerCase());
-          if (!headers.includes('email')) {
+        .on('headers', (headers: string[]) => {
+          const normalizedHeaders = headers.map((value) =>
+            value.trim().toLowerCase(),
+          );
+
+          if (!normalizedHeaders.includes('email')) {
             reject(
               new BadRequestException(
                 'Colonne "email" obligatoire absente du CSV',
@@ -61,24 +64,28 @@ export class ContactsImportService {
         })
         .on('data', (row: Record<string, string>) => {
           const email = row['email']?.trim().toLowerCase();
+
           if (!email || !this.isValidEmail(email)) {
-            errors.push(`Email invalide : ${row['email'] ?? 'vide'}`);
+            errors.push(
+              `Ligne ignoree - email invalide: "${row['email'] ?? 'vide'}"`,
+            );
             return;
           }
 
           const tags = row['tags']
             ? row['tags']
                 .split(',')
-                .map((t) => t.trim())
+                .map((tag) => tag.trim())
                 .filter(Boolean)
             : undefined;
 
+          const totalRevenueRaw = row['totalrevenue'] ?? row['totalRevenue'];
           const totalRevenue =
-            row['totalrevenue'] || row['totalRevenue']
-              ? parseFloat(row['totalrevenue'] ?? row['totalRevenue'])
+            totalRevenueRaw !== undefined && totalRevenueRaw !== ''
+              ? Number.parseFloat(totalRevenueRaw)
               : undefined;
 
-          const emailStatus = row['emailstatus'] || row['emailStatus'];
+          const emailStatus = row['emailstatus'] ?? row['emailStatus'];
           const validStatuses: EmailStatus[] = [
             EmailStatus.SUBSCRIBED,
             EmailStatus.UNSUBSCRIBED,
@@ -88,12 +95,12 @@ export class ContactsImportService {
           const upperEmailStatus = emailStatus?.toUpperCase() as
             | EmailStatus
             | undefined;
-          const parsedStatus: EmailStatus | undefined =
+          const parsedStatus =
             upperEmailStatus && validStatuses.includes(upperEmailStatus)
               ? upperEmailStatus
               : undefined;
 
-          results.push({
+          contacts.push({
             email,
             firstName: row['firstname'] || row['firstName'] || undefined,
             lastName: row['lastname'] || row['lastName'] || undefined,
@@ -102,106 +109,122 @@ export class ContactsImportService {
               row['sourcechannel'] || row['sourceChannel'] || undefined,
             tags,
             emailStatus: parsedStatus,
-            totalRevenue: isNaN(totalRevenue!) ? undefined : totalRevenue,
+            totalRevenue:
+              totalRevenue === undefined || Number.isNaN(totalRevenue)
+                ? undefined
+                : totalRevenue,
           });
         })
-        .on('end', () => resolve(results))
+        .on('end', () => resolve({ contacts, errors }))
         .on('error', (err: Error) => reject(err));
     });
   }
 
-  // ── Import principal ──────────────────────────────
   async importFromCsv(tenantId: string, buffer: Buffer): Promise<ImportResult> {
-    const parsed = await this.parseCsv(buffer);
+    const { contacts: parsed, errors: parseErrors } =
+      await this.parseCsv(buffer);
 
     if (parsed.length === 0) {
-      return { imported: 0, updated: 0, skipped: 0, errors: [] };
+      return {
+        imported: 0,
+        updated: 0,
+        skipped: parseErrors.length,
+        errors: parseErrors,
+      };
     }
 
-    const emails = parsed.map((p) => p.email);
-
-    // Charger les contacts existants en 1 requête
+    const emails = parsed.map((contact) => contact.email);
     const existing = await this.prisma.contact.findMany({
       where: { tenantId, email: { in: emails } },
     });
-    const existingMap = new Map(existing.map((c) => [c.email, c]));
+    const existingMap = new Map(
+      existing.map((contact) => [contact.email, contact]),
+    );
 
-    const toCreate = parsed.filter((p) => !existingMap.has(p.email));
-    const toUpdate = parsed.filter((p) => existingMap.has(p.email));
+    const toCreate = parsed.filter(
+      (contact) => !existingMap.has(contact.email),
+    );
+    const toUpdate = parsed.filter((contact) => existingMap.has(contact.email));
 
-    // Vérifier quota uniquement sur les nouveaux
     if (toCreate.length > 0) {
       await this.quota.checkContactLimit(tenantId, toCreate.length);
     }
 
-    const errors: string[] = [];
     let updated = 0;
 
-    // Créer les nouveaux contacts
     if (toCreate.length > 0) {
       await this.prisma.contact.createMany({
-        data: toCreate.map((p) => ({
+        data: toCreate.map((contact) => ({
           tenantId,
-          email: p.email,
-          firstName: p.firstName,
-          lastName: p.lastName,
-          phone: p.phone,
-          sourceChannel: p.sourceChannel,
-          emailStatus: p.emailStatus ?? EmailStatus.SUBSCRIBED,
-          totalRevenue: p.totalRevenue ?? 0,
-          properties: p.tags ? { tags: p.tags } : {},
+          email: contact.email,
+          firstName: contact.firstName,
+          lastName: contact.lastName,
+          phone: contact.phone,
+          sourceChannel: contact.sourceChannel,
+          emailStatus: contact.emailStatus ?? EmailStatus.SUBSCRIBED,
+          totalRevenue: contact.totalRevenue ?? 0,
+          properties: contact.tags ? { tags: contact.tags } : {},
         })),
         skipDuplicates: true,
       });
     }
 
-    // Mettre à jour les existants — Fill Missing Only
-    for (const p of toUpdate) {
-      const existing = existingMap.get(p.email)!;
+    for (const contact of toUpdate) {
+      const existingContact = existingMap.get(contact.email);
+      if (!existingContact) {
+        continue;
+      }
+
       const updates: Record<string, unknown> = {};
 
-      if (!existing.firstName && p.firstName) updates.firstName = p.firstName;
-      if (!existing.lastName && p.lastName) updates.lastName = p.lastName;
-      if (!existing.phone && p.phone) updates.phone = p.phone;
-      if (!existing.sourceChannel && p.sourceChannel)
-        updates.sourceChannel = p.sourceChannel;
+      if (!existingContact.firstName && contact.firstName) {
+        updates.firstName = contact.firstName;
+      }
+      if (!existingContact.lastName && contact.lastName) {
+        updates.lastName = contact.lastName;
+      }
+      if (!existingContact.phone && contact.phone) {
+        updates.phone = contact.phone;
+      }
+      if (!existingContact.sourceChannel && contact.sourceChannel) {
+        updates.sourceChannel = contact.sourceChannel;
+      }
 
-      // Tags — merge si vide
       const existingProperties =
-        existing.properties && typeof existing.properties === 'object'
-          ? (existing.properties as Prisma.JsonObject)
+        existingContact.properties &&
+        typeof existingContact.properties === 'object'
+          ? (existingContact.properties as Prisma.JsonObject)
           : {};
       const existingTagsRaw = existingProperties['tags'];
       const existingTags = Array.isArray(existingTagsRaw)
         ? existingTagsRaw
         : [];
-      if (existingTags.length === 0 && p.tags?.length) {
-        updates.properties = { ...existingProperties, tags: p.tags };
+
+      if (existingTags.length === 0 && contact.tags?.length) {
+        updates.properties = { ...existingProperties, tags: contact.tags };
       }
 
       if (Object.keys(updates).length > 0) {
         await this.prisma.contact.update({
-          where: { id: existing.id },
+          where: { id: existingContact.id },
           data: updates,
         });
-        updated++;
+        updated += 1;
       }
     }
 
     this.logger.log(
-      `Import CSV tenant ${tenantId}: ` +
-        `${toCreate.length} importés, ${updated} mis à jour`,
+      `Import CSV tenant ${tenantId}: ${toCreate.length} imported, ${updated} updated, ${parseErrors.length} skipped`,
     );
 
     return {
       imported: toCreate.length,
       updated,
-      skipped: 0,
-      errors,
+      skipped: parseErrors.length,
+      errors: parseErrors,
     };
   }
 
-  // ── Template CSV ──────────────────────────────────
   getTemplate(): string {
     return (
       'email,firstName,lastName,phone,' +

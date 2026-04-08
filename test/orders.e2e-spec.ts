@@ -7,6 +7,7 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { ClickhouseService } from '../src/database/clickhouse/clickhouse.service';
 import { PrismaService } from '../src/database/prisma/prisma.service';
+import { ProductsService } from '../src/modules/products/products.service';
 import { createCommercePrismaMock } from './support/create-commerce-prisma-mock';
 import { toCookieHeader } from './support/create-prisma-mock';
 
@@ -29,6 +30,10 @@ describe('Orders (e2e)', () => {
   let contactEmail = 'customer@example.com';
 
   const prismaMock = createCommercePrismaMock();
+  const productsServiceMock = {
+    decrementStock: jest.fn().mockResolvedValue(null),
+    restoreStock: jest.fn().mockResolvedValue(null),
+  };
 
   const owner = {
     tenantName: 'Orders Corp',
@@ -43,6 +48,8 @@ describe('Orders (e2e)', () => {
     })
       .overrideProvider(PrismaService)
       .useValue(prismaMock)
+      .overrideProvider(ProductsService)
+      .useValue(productsServiceMock)
       .overrideProvider(ClickhouseService)
       .useValue({
         isHealthy: jest.fn().mockResolvedValue(true),
@@ -183,6 +190,58 @@ describe('Orders (e2e)', () => {
         .expect(200);
 
       expect(response.body.status).toBe('FULFILLED');
+    });
+
+    it('200 - restores stock when an order is cancelled', async () => {
+      productsServiceMock.restoreStock.mockClear();
+
+      const contact = await prisma.contact.findFirst({
+        where: { tenantId, email: contactEmail },
+      });
+
+      const seededOrder = await prisma.order.create({
+        data: {
+          tenantId,
+          contactId: contact!.id,
+          externalId: `cancel-${Date.now()}`,
+          orderNumber: '#2001',
+          status: 'PAID',
+          totalAmount: 80,
+          subtotal: 80,
+          currency: 'EUR',
+          placedAt: new Date('2026-03-27T12:00:00.000Z'),
+        },
+      });
+
+      await prisma.orderItem.createMany({
+        data: [
+          {
+            tenantId,
+            orderId: seededOrder.id,
+            externalId: `${seededOrder.id}-item-1`,
+            productId: 'prod-restore-1',
+            productExternalId: 'prod-ext-restore-1',
+            name: 'Tracked mug',
+            quantity: 2,
+            unitPrice: 40,
+            totalPrice: 80,
+          },
+        ],
+      });
+
+      const response = await request(app.getHttpServer())
+        .patch(`/api/v1/orders/${seededOrder.id}/status`)
+        .set('Cookie', cookies)
+        .send({ status: 'CANCELLED' })
+        .expect(200);
+
+      expect(response.body.status).toBe('CANCELLED');
+      expect(productsServiceMock.restoreStock).toHaveBeenCalledWith(
+        tenantId,
+        'prod-restore-1',
+        2,
+        expect.anything(),
+      );
     });
   });
 

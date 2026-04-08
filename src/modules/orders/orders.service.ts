@@ -102,17 +102,19 @@ export class OrdersService {
           }),
         });
 
-        for (const item of dto.items) {
-          if (!item.productId) {
-            continue;
-          }
+        if (!this.isStockReleasedStatus(dto.status)) {
+          for (const item of dto.items) {
+            if (!item.productId) {
+              continue;
+            }
 
-          await this.productsService.decrementStock(
-            tenantId,
-            item.productId,
-            item.quantity,
-            tx,
-          );
+            await this.productsService.decrementStock(
+              tenantId,
+              item.productId,
+              item.quantity,
+              tx,
+            );
+          }
         }
       }
 
@@ -182,22 +184,65 @@ export class OrdersService {
   }
 
   async updateStatus(tenantId: string, id: string, dto: UpdateOrderStatusDto) {
-    const existing = await this.prisma.order.findFirst({
-      where: { id, tenantId },
-      select: { id: true, contactId: true, status: true },
+    const { existing, order } = await this.prisma.$transaction(async (tx) => {
+      const currentOrder = await tx.order.findFirst({
+        where: { id, tenantId },
+        include: { items: true },
+      });
+
+      if (!currentOrder) {
+        throw new NotFoundException('Order not found');
+      }
+
+      const nextOrder = await tx.order.update({
+        where: { id: currentOrder.id },
+        data: { status: dto.status },
+        include: { items: true },
+      });
+
+      if (
+        !this.isStockReleasedStatus(currentOrder.status) &&
+        this.isStockReleasedStatus(nextOrder.status)
+      ) {
+        for (const item of currentOrder.items) {
+          if (!item.productId) {
+            continue;
+          }
+
+          await this.productsService.restoreStock(
+            tenantId,
+            item.productId,
+            item.quantity,
+            tx,
+          );
+        }
+      }
+
+      if (
+        this.isStockReleasedStatus(currentOrder.status) &&
+        !this.isStockReleasedStatus(nextOrder.status)
+      ) {
+        for (const item of currentOrder.items) {
+          if (!item.productId) {
+            continue;
+          }
+
+          await this.productsService.decrementStock(
+            tenantId,
+            item.productId,
+            item.quantity,
+            tx,
+          );
+        }
+      }
+
+      await this.recalculateContactMetrics(tx, currentOrder.contactId);
+
+      return {
+        existing: currentOrder,
+        order: nextOrder,
+      };
     });
-
-    if (!existing) {
-      throw new NotFoundException('Order not found');
-    }
-
-    const order = await this.prisma.order.update({
-      where: { id: existing.id },
-      data: { status: dto.status },
-      include: { items: true },
-    });
-
-    await this.recalculateContactMetrics(this.prisma, existing.contactId);
 
     if (
       !this.isPostPurchaseStatus(existing.status) &&
@@ -237,6 +282,10 @@ export class OrdersService {
 
   private isPostPurchaseStatus(status: OrderStatus) {
     return status === OrderStatus.PAID || status === OrderStatus.FULFILLED;
+  }
+
+  private isStockReleasedStatus(status: OrderStatus) {
+    return status === OrderStatus.CANCELLED || status === OrderStatus.REFUNDED;
   }
 
   private triggerFlows(

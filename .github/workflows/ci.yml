@@ -86,3 +86,6 @@ jobs:
 
       - name: E2E tests
         run: npm run test:e2e
+
+      - name: Run contract tests
+        run: npm run test:contract

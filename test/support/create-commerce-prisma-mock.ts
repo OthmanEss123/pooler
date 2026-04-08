@@ -35,7 +35,11 @@ type CommerceOrder = {
 
 type CommerceOrderItem = {
   id: string;
+  tenantId: string;
   orderId: string;
+  externalId: string;
+  productId: string | null;
+  productExternalId: string | null;
   name: string;
   quantity: number;
   unitPrice: number;
@@ -480,7 +484,11 @@ export const createCommercePrismaMock = () => {
       for (const item of data) {
         orderItems.push({
           id: `commerce-order-item-${orderItemCounter++}`,
+          tenantId: item.tenantId,
           orderId: item.orderId,
+          externalId: item.externalId,
+          productId: item.productId ?? null,
+          productExternalId: item.productExternalId ?? null,
           name: item.name,
           quantity: item.quantity,
           unitPrice: Number(item.unitPrice),

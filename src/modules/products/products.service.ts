@@ -146,6 +146,28 @@ export class ProductsService {
     return updated;
   }
 
+  async restoreStock(
+    tenantId: string,
+    productId: string,
+    quantity: number,
+    client: PrismaLike = this.prisma,
+  ) {
+    const product = await client.product.findFirst({
+      where: { id: productId, tenantId },
+    });
+
+    if (!product || !product.trackStock) {
+      return product;
+    }
+
+    return client.product.update({
+      where: { id: product.id },
+      data: {
+        stockQuantity: (product.stockQuantity ?? 0) + quantity,
+      },
+    });
+  }
+
   async remove(tenantId: string, id: string): Promise<void> {
     await this.findOne(tenantId, id);
     await this.prisma.product.update({
@@ -186,14 +208,17 @@ export class ProductsService {
     }
 
     const title = `Stock faible - ${product.name}`;
-    const recentThreshold = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const recentThreshold = new Date(Date.now() - 48 * 60 * 60 * 1000);
 
     const existing = await client.insight.findFirst({
       where: {
         tenantId,
         type: InsightType.ANOMALY,
-        title,
         createdAt: { gte: recentThreshold },
+        data: {
+          path: ['productId'],
+          equals: product.id,
+        },
       },
     });
 
@@ -206,12 +231,13 @@ export class ProductsService {
         tenantId,
         type: InsightType.ANOMALY,
         title,
-        description: `Stock quantity ${product.stockQuantity} is at or below alert threshold ${product.lowStockAlert}.`,
+        description: `${product.stockQuantity} units remaining (threshold: ${product.lowStockAlert}).`,
         data: {
           productId: product.id,
+          productName: product.name,
           sku: product.sku,
           stockQuantity: product.stockQuantity,
-          lowStockAlert: product.lowStockAlert,
+          threshold: product.lowStockAlert,
         },
       },
     });

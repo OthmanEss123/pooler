@@ -1308,6 +1308,33 @@ export const createPrismaMock = () => {
                 }
               }
 
+              if (
+                where.data &&
+                typeof where.data === 'object' &&
+                'path' in (where.data as Record<string, unknown>) &&
+                'equals' in (where.data as Record<string, unknown>)
+              ) {
+                const dataFilter = where.data as {
+                  path?: string[];
+                  equals?: unknown;
+                };
+                const [pathKey] = dataFilter.path ?? [];
+                const candidateData =
+                  candidate.data &&
+                  typeof candidate.data === 'object' &&
+                  !Array.isArray(candidate.data)
+                    ? (candidate.data as Record<string, unknown>)
+                    : null;
+
+                if (!pathKey || !candidateData) {
+                  return false;
+                }
+
+                if (candidateData[pathKey] !== dataFilter.equals) {
+                  return false;
+                }
+              }
+
               return true;
             }) ?? null
           );
