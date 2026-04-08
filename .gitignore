@@ -54,3 +54,18 @@ pids
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Debug artifacts
+out.json
+out.txt
+out_utf8.txt
+out_utf8_real.txt
+out_keys.txt
+out_contract_2.txt
+out_contract_2_utf8.txt
+mfa_out.txt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
