@@ -1,11 +1,10 @@
-﻿import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { CurrentTenant } from '../../common/decorators/current-tenant.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { AnalyticsService } from './analytics.service';
 import { IngestDailyMetricsDto } from './dto/ingest-daily-metrics.dto';
 import { QueryAnalyticsDto } from './dto/query-analytics.dto';
-import { QueryEmailFunnelDto } from './dto/query-email-funnel.dto';
 
 @UseGuards(RolesGuard)
 @Controller('analytics')
@@ -42,17 +41,6 @@ export class AnalyticsController {
       tenantId,
       query.from,
       query.to,
-    );
-  }
-
-  @Get('email-funnel')
-  getEmailFunnel(
-    @CurrentTenant() tenantId: string,
-    @Query() query: QueryEmailFunnelDto,
-  ) {
-    return this.analyticsService.getEmailFunnelMetrics(
-      tenantId,
-      query.campaignId,
     );
   }
 

@@ -19,7 +19,6 @@ process.env.CLICKHOUSE_URL ??= 'http://default:password@localhost:8123/pilot';
 process.env.JWT_SECRET ??=
   '1234567890123456789012345678901234567890123456789012345678901234';
 process.env.JWT_EXPIRES_IN ??= '15m';
-process.env.NARRATIVE_AGENT_URL = '';
 
 interface MockProduct {
   id: string;

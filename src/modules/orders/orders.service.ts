@@ -1,9 +1,6 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+﻿import { Injectable, NotFoundException } from '@nestjs/common';
 import { OrderStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma/prisma.service';
-import { SuppressionsService } from '../contacts/suppressions.service';
-import { FlowTriggerType } from '../flows/dto/create-flow.dto';
-import { FlowsService } from '../flows/flows.service';
 import { ProductsService } from '../products/products.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { QueryOrdersDto } from './dto/query-orders.dto';
@@ -40,21 +37,15 @@ type OrderMetricRow = {
 
 type UpdateStatusInput = UpdateOrderStatusDto | OrderStatus;
 
-type UpdateStatusOptions = {
-  emitPostPurchaseEffects?: boolean;
-};
-
 @Injectable()
 export class OrdersService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly flowsService: FlowsService,
-    private readonly suppressionsService: SuppressionsService,
     private readonly productsService: ProductsService,
   ) {}
 
   async create(tenantId: string, dto: CreateOrderInput) {
-    const result = await this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(async (tx) => {
       const contact = await this.findOrCreateContact(
         tx,
         tenantId,
@@ -130,19 +121,6 @@ export class OrdersService {
 
       return created;
     });
-
-    if (dto.emitFlows ?? true) {
-      const triggerTypes = [FlowTriggerType.ORDER_CREATED];
-
-      if (this.isPostPurchaseStatus(result.status)) {
-        triggerTypes.unshift(FlowTriggerType.POST_PURCHASE);
-        this.syncSuppressionTargets(tenantId);
-      }
-
-      this.triggerFlows(tenantId, result.contactId, triggerTypes);
-    }
-
-    return result;
   }
 
   async upsertExternalOrder(tenantId: string, dto: UpsertExternalOrderInput) {
@@ -161,16 +139,11 @@ export class OrdersService {
     });
 
     if (!existing) {
-      return this.create(tenantId, {
-        ...dto,
-        emitFlows: dto.emitFlows ?? false,
-      });
+      return this.create(tenantId, dto);
     }
 
     if (existing.status !== dto.status) {
-      await this.updateStatus(tenantId, existing.id, dto.status, {
-        emitPostPurchaseEffects: dto.emitFlows ?? false,
-      });
+      await this.updateStatus(tenantId, existing.id, dto.status);
     }
 
     return this.syncExternalSnapshot(
@@ -220,14 +193,9 @@ export class OrdersService {
     return order;
   }
 
-  async updateStatus(
-    tenantId: string,
-    id: string,
-    input: UpdateStatusInput,
-    options: UpdateStatusOptions = {},
-  ) {
+  async updateStatus(tenantId: string, id: string, input: UpdateStatusInput) {
     const nextStatus = this.getStatusValue(input);
-    const { existing, order } = await this.prisma.$transaction(async (tx) => {
+    const { order } = await this.prisma.$transaction(async (tx) => {
       const currentOrder = await tx.order.findFirst({
         where: { id, tenantId },
         include: { items: true },
@@ -282,22 +250,9 @@ export class OrdersService {
       await this.recalculateContactMetrics(tx, currentOrder.contactId);
 
       return {
-        existing: currentOrder,
         order: nextOrder,
       };
     });
-
-    if (options.emitPostPurchaseEffects ?? true) {
-      if (
-        !this.isPostPurchaseStatus(existing.status) &&
-        this.isPostPurchaseStatus(order.status)
-      ) {
-        this.syncSuppressionTargets(tenantId);
-        this.triggerFlows(tenantId, existing.contactId, [
-          FlowTriggerType.POST_PURCHASE,
-        ]);
-      }
-    }
 
     return order;
   }
@@ -325,29 +280,8 @@ export class OrdersService {
     });
   }
 
-  private isPostPurchaseStatus(status: OrderStatus) {
-    return status === OrderStatus.PAID || status === OrderStatus.FULFILLED;
-  }
-
   private isStockReleasedStatus(status: OrderStatus) {
     return status === OrderStatus.CANCELLED || status === OrderStatus.REFUNDED;
-  }
-
-  private triggerFlows(
-    tenantId: string,
-    contactId: string,
-    triggerTypes: FlowTriggerType[],
-  ): void {
-    for (const type of triggerTypes) {
-      void this.flowsService.triggerFlowsSafe(tenantId, type, contactId);
-    }
-  }
-
-  private syncSuppressionTargets(tenantId: string): void {
-    void Promise.all([
-      this.suppressionsService.syncRecentBuyersSegment(tenantId, 30),
-      this.suppressionsService.syncSuppressionsToAds(tenantId),
-    ]);
   }
 
   private async recalculateContactMetrics(
@@ -448,8 +382,7 @@ export class OrdersService {
       }
 
       await this.recalculateContactMetrics(tx, contact.id);
-
-      if (previousContactId !== contact.id) {
+      if (contact.id !== previousContactId) {
         await this.recalculateContactMetrics(tx, previousContactId);
       }
 
@@ -474,24 +407,17 @@ export class OrdersService {
     const productsById = new Map<string, { id: string; externalId: string }>();
 
     for (const item of items) {
-      if (!item.productId || productsById.has(item.productId)) {
+      if (!item.productId) {
         continue;
       }
 
       const product = await client.product.findFirst({
-        where: {
-          id: item.productId,
-          tenantId,
-          isActive: true,
-        },
-        select: {
-          id: true,
-          externalId: true,
-        },
+        where: { id: item.productId, tenantId },
+        select: { id: true, externalId: true },
       });
 
       if (!product) {
-        throw new NotFoundException(`Produit ${item.productId} introuvable`);
+        throw new NotFoundException(`Product ${item.productId} not found`);
       }
 
       productsById.set(item.productId, product);
@@ -503,36 +429,33 @@ export class OrdersService {
   private buildOrderItemsData(
     tenantId: string,
     orderId: string,
-    externalId: string,
+    orderExternalId: string,
     items: OrderItemInput[],
     productsById: Map<string, { id: string; externalId: string }>,
   ) {
-    return items.map((item, index) => {
-      const product = item.productId
-        ? (productsById.get(item.productId) ?? null)
-        : null;
+    return items.map((item, index) => ({
+      tenantId,
+      orderId,
+      externalId: `${orderExternalId}:${index}`,
+      productId: item.productId ?? null,
+      productExternalId:
+        item.productExternalId ??
+        (item.productId
+          ? (productsById.get(item.productId)?.externalId ?? null)
+          : null),
+      name: item.name,
+      sku: item.sku ?? null,
+      quantity: item.quantity,
+      unitPrice: new Prisma.Decimal(item.unitPrice),
+      totalPrice: new Prisma.Decimal(item.totalPrice),
+    }));
+  }
 
-      return {
-        tenantId,
-        orderId,
-        externalId: `${externalId}-item-${index + 1}`,
-        productId: product?.id ?? item.productId ?? null,
-        productExternalId:
-          item.productExternalId ?? product?.externalId ?? null,
-        name: item.name,
-        sku: item.sku ?? null,
-        quantity: item.quantity,
-        unitPrice: new Prisma.Decimal(item.unitPrice),
-        totalPrice: new Prisma.Decimal(item.totalPrice),
-      };
-    });
+  private toOrderDate(input: string | Date) {
+    return input instanceof Date ? input : new Date(input);
   }
 
   private toInputJsonValue(value: unknown): Prisma.InputJsonValue {
-    return JSON.parse(JSON.stringify(value ?? null)) as Prisma.InputJsonValue;
-  }
-
-  private toOrderDate(value: string | Date): Date {
-    return value instanceof Date ? value : new Date(value);
+    return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
   }
 }

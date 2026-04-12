@@ -1,9 +1,6 @@
 ﻿import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { InsightType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma/prisma.service';
-import { BriefingService } from './briefing.service';
-import { CampaignAssistService } from './campaign-assist.service';
 
 type AskResponse = {
   answer?: string;
@@ -13,20 +10,9 @@ type AskResponse = {
 
 @Injectable()
 export class CopilotService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly configService: ConfigService,
-    private readonly briefingService: BriefingService,
-    private readonly campaignAssistService: CampaignAssistService,
-  ) {}
+  private readonly agentUrl = 'http://localhost:8003';
 
-  async getNarrative(tenantId: string) {
-    const briefing = await this.briefingService.getBriefing(tenantId);
-    return {
-      narrative: briefing.narrative,
-      generatedAt: briefing.generatedAt,
-    };
-  }
+  constructor(private readonly prisma: PrismaService) {}
 
   async getRecommendations(tenantId: string) {
     const insights = await this.prisma.insight.findMany({
@@ -69,18 +55,12 @@ export class CopilotService {
     question: string,
     context?: Record<string, unknown>,
   ) {
-    const explicitAgentUrl = process.env.NARRATIVE_AGENT_URL;
-    const baseUrl =
-      explicitAgentUrl ?? this.configService.get<string>('NARRATIVE_AGENT_URL');
-    if (
-      (process.env.NODE_ENV === 'test' && !explicitAgentUrl?.trim()) ||
-      !baseUrl
-    ) {
+    if (process.env.NODE_ENV === 'test') {
       return this.buildFallbackAnswer(question);
     }
 
     try {
-      const response = await fetch(`${baseUrl}/ask`, {
+      const response = await fetch(`${this.agentUrl}/ask`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -88,7 +68,7 @@ export class CopilotService {
         body: JSON.stringify({
           tenantId,
           question,
-          context: context ?? {},
+          context: JSON.stringify(context ?? {}),
         }),
         signal: AbortSignal.timeout(10000),
       });
@@ -108,10 +88,6 @@ export class CopilotService {
     }
   }
 
-  suggestCampaign(tenantId: string, goal: string) {
-    return this.campaignAssistService.suggestCampaign(tenantId, goal);
-  }
-
   private buildFallbackAnswer(question: string) {
     return {
       answer: `Service temporairement indisponible. Question recue: ${question}`,
@@ -123,17 +99,15 @@ export class CopilotService {
   private mapAction(type: InsightType) {
     switch (type) {
       case InsightType.AD_WASTE:
-        return 'Pauser la campagne ads';
+        return 'Pauser ou optimiser la campagne ads';
       case InsightType.ANOMALY:
         return 'Analyser la cause';
       case InsightType.SEGMENT_OPPORTUNITY:
-        return 'Creer et envoyer campagne';
-      case InsightType.EMAIL_PERFORMANCE:
-        return 'Optimiser le template';
+        return 'Ajuster le ciblage ou le budget';
       case InsightType.PRODUCT_INTELLIGENCE:
         return 'Renforcer la mise en avant produit';
       case InsightType.REVENUE_FORECAST:
-        return 'Preparer une campagne de soutien';
+        return 'Preparer un plan de soutien';
       default:
         return 'Analyser cet insight';
     }

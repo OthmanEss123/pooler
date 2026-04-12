@@ -1,4 +1,4 @@
-import { Injectable, OnModuleDestroy } from '@nestjs/common';
+﻿import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Queue } from 'bullmq';
 import { RedisService } from '../redis/redis.service';
@@ -10,15 +10,13 @@ export interface QueueCounters {
 }
 
 export interface QueueHealthStats {
-  campaign: QueueCounters;
-  email: QueueCounters;
+  sync: QueueCounters;
 }
 
 @Injectable()
 export class QueueHealthService implements OnModuleDestroy {
   private readonly queueEnabled: boolean;
-  private readonly campaignQueue?: Queue;
-  private readonly emailQueue?: Queue;
+  private readonly syncQueue?: Queue;
 
   constructor(
     private readonly configService: ConfigService,
@@ -31,55 +29,30 @@ export class QueueHealthService implements OnModuleDestroy {
     }
 
     const connection = this.redisService.getConnectionOptions();
-    this.campaignQueue = new Queue('campaign', { connection });
-    this.emailQueue = new Queue('email', { connection });
+    this.syncQueue = new Queue('sync', { connection });
   }
 
   async getStats(): Promise<QueueHealthStats> {
-    if (!this.queueEnabled || !this.campaignQueue || !this.emailQueue) {
+    if (!this.queueEnabled || !this.syncQueue) {
       return {
-        campaign: { waiting: 0, active: 0, failed: 0 },
-        email: { waiting: 0, active: 0, failed: 0 },
+        sync: { waiting: 0, active: 0, failed: 0 },
       };
     }
 
-    const [
-      campaignWaiting,
-      campaignActive,
-      campaignFailed,
-      emailWaiting,
-      emailActive,
-      emailFailed,
-    ] = await Promise.all([
-      this.campaignQueue.getWaitingCount(),
-      this.campaignQueue.getActiveCount(),
-      this.campaignQueue.getFailedCount(),
-      this.emailQueue.getWaitingCount(),
-      this.emailQueue.getActiveCount(),
-      this.emailQueue.getFailedCount(),
+    const [waiting, active, failed] = await Promise.all([
+      this.syncQueue.getWaitingCount(),
+      this.syncQueue.getActiveCount(),
+      this.syncQueue.getFailedCount(),
     ]);
 
     return {
-      campaign: {
-        waiting: campaignWaiting,
-        active: campaignActive,
-        failed: campaignFailed,
-      },
-      email: {
-        waiting: emailWaiting,
-        active: emailActive,
-        failed: emailFailed,
-      },
+      sync: { waiting, active, failed },
     };
   }
 
   async onModuleDestroy(): Promise<void> {
-    if (this.campaignQueue) {
-      await this.campaignQueue.close();
-    }
-
-    if (this.emailQueue) {
-      await this.emailQueue.close();
+    if (this.syncQueue) {
+      await this.syncQueue.close();
     }
   }
 }

@@ -31,8 +31,9 @@ export class MetricsController {
     return {
       timestamp: new Date().toISOString(),
       ...metrics,
-      jobsWaiting: queueStats.campaign.waiting + queueStats.email.waiting,
-      jobsFailed: queueStats.campaign.failed + queueStats.email.failed,
+      jobsWaiting: queueStats.sync.waiting,
+      jobsActive: queueStats.sync.active,
+      jobsFailed: queueStats.sync.failed,
     };
   }
 }

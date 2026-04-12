@@ -1,10 +1,8 @@
-﻿import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { FlowStatus, OrderStatus } from '@prisma/client';
+import { Injectable, Logger } from '@nestjs/common';
+import { OrderStatus, RfmSegment } from '@prisma/client';
 import { PrismaService } from '../../database/prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
 import { AnalyticsService } from '../analytics/analytics.service';
-import { HealthScoreService } from '../insights/health-score.service';
 import {
   BriefingCampaignDto,
   BriefingForecastDto,
@@ -18,13 +16,6 @@ type SummarySnapshot = {
   adsSpend: number;
 };
 
-type ProductRecord = {
-  id: string;
-  externalId: string;
-  sku: string | null;
-  name: string;
-};
-
 @Injectable()
 export class BriefingService {
   private readonly logger = new Logger(BriefingService.name);
@@ -33,9 +24,7 @@ export class BriefingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redisService: RedisService,
-    private readonly configService: ConfigService,
     private readonly analyticsService: AnalyticsService,
-    private readonly healthScoreService: HealthScoreService,
   ) {}
 
   async getBriefing(tenantId: string): Promise<BriefingResponseDto> {
@@ -76,37 +65,28 @@ export class BriefingService {
       todayTo: endOfToday.toISOString(),
     };
 
-    const [
-      yesterdaySummary,
-      todaySummary,
-      insights,
-      healthScores,
-      topCampaigns,
-      forecast,
-      activeFlowProducts,
-    ] = await Promise.all([
-      this.getSummarySafe(tenantId, startOfYesterday, endOfYesterday),
-      this.getSummarySafe(tenantId, startOfToday, endOfToday),
-      this.prisma.insight.findMany({
-        where: {
-          tenantId,
-          isRead: false,
-        },
-        orderBy: {
-          createdAt: 'desc',
-        },
-        take: 5,
-        select: {
-          type: true,
-          title: true,
-          description: true,
-        },
-      }),
-      this.healthScoreService.getDistribution(tenantId),
-      this.getTopCampaigns(tenantId),
-      this.getForecast(tenantId),
-      this.getActiveFlowProducts(tenantId),
-    ]);
+    const [yesterdaySummary, todaySummary, insights, healthScores, forecast] =
+      await Promise.all([
+        this.getSummarySafe(tenantId, startOfYesterday, endOfYesterday),
+        this.getSummarySafe(tenantId, startOfToday, endOfToday),
+        this.prisma.insight.findMany({
+          where: {
+            tenantId,
+            isRead: false,
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+          take: 5,
+          select: {
+            type: true,
+            title: true,
+            description: true,
+          },
+        }),
+        this.getHealthScoreDistribution(tenantId),
+        this.getForecast(tenantId),
+      ]);
 
     const briefing: BriefingResponseDto = {
       generatedAt,
@@ -123,15 +103,9 @@ export class BriefingService {
       },
       insights,
       healthScores,
-      topCampaigns,
+      topCampaigns: this.getTopCampaignsPlaceholder(),
       forecast,
-      narrative: '',
     };
-
-    briefing.narrative = await this.generateNarrative(tenantId, {
-      ...briefing,
-      activeFlowProducts,
-    });
 
     await this.redisService.set(
       this.getBriefingCacheKey(tenantId),
@@ -157,7 +131,7 @@ export class BriefingService {
       return {
         totalRevenue: Number(summary.totalRevenue ?? 0),
         totalOrders: Number(summary.totalOrders ?? 0),
-        emailRevenue: Number(summary.emailRevenue ?? 0),
+        emailRevenue: 0,
         adsSpend: Number(summary.adsSpend ?? 0),
       };
     } catch (error) {
@@ -173,7 +147,7 @@ export class BriefingService {
     from: Date,
     to: Date,
   ): Promise<SummarySnapshot> {
-    const [orders, campaigns, adCampaigns] = await Promise.all([
+    const [orders, adCampaigns] = await Promise.all([
       this.prisma.order.findMany({
         where: {
           tenantId,
@@ -187,28 +161,6 @@ export class BriefingService {
         },
         select: {
           totalAmount: true,
-        },
-      }),
-      this.prisma.campaign.findMany({
-        where: {
-          tenantId,
-          OR: [
-            {
-              sentAt: {
-                gte: from,
-                lte: to,
-              },
-            },
-            {
-              createdAt: {
-                gte: from,
-                lte: to,
-              },
-            },
-          ],
-        },
-        select: {
-          revenue: true,
         },
       }),
       this.prisma.adCampaign.findMany({
@@ -231,10 +183,7 @@ export class BriefingService {
         0,
       ),
       totalOrders: orders.length,
-      emailRevenue: campaigns.reduce(
-        (sum, campaign) => sum + Number(campaign.revenue ?? 0),
-        0,
-      ),
+      emailRevenue: 0,
       adsSpend: adCampaigns.reduce(
         (sum, campaign) => sum + Number(campaign.spend ?? 0),
         0,
@@ -242,57 +191,31 @@ export class BriefingService {
     };
   }
 
-  private async getTopCampaigns(
-    tenantId: string,
-  ): Promise<BriefingCampaignDto[]> {
-    const since = new Date();
-    since.setDate(since.getDate() - 7);
-
-    const campaigns = await this.prisma.campaign.findMany({
-      where: {
-        tenantId,
-        OR: [
-          {
-            sentAt: {
-              gte: since,
-            },
-          },
-          {
-            createdAt: {
-              gte: since,
-            },
-          },
-        ],
-      },
-      orderBy: {
-        revenue: 'desc',
-      },
-      take: 3,
-      select: {
-        name: true,
-        totalSent: true,
-        totalDelivered: true,
-        totalOpened: true,
-        revenue: true,
-      },
+  private async getHealthScoreDistribution(tenantId: string) {
+    const scores = await this.prisma.customerHealthScore.findMany({
+      where: { tenantId },
+      select: { segment: true },
     });
 
-    return campaigns.map((campaign) => ({
-      name: campaign.name,
-      openRate:
-        campaign.totalDelivered > 0
-          ? Number(
-              ((campaign.totalOpened / campaign.totalDelivered) * 100).toFixed(
-                2,
-              ),
-            )
-          : campaign.totalSent > 0
-            ? Number(
-                ((campaign.totalOpened / campaign.totalSent) * 100).toFixed(2),
-              )
-            : 0,
-      revenue: Number(campaign.revenue ?? 0),
-    }));
+    const distribution: Record<RfmSegment, number> = {
+      [RfmSegment.CHAMPION]: 0,
+      [RfmSegment.LOYAL]: 0,
+      [RfmSegment.POTENTIAL]: 0,
+      [RfmSegment.NEW]: 0,
+      [RfmSegment.AT_RISK]: 0,
+      [RfmSegment.CANT_LOSE]: 0,
+      [RfmSegment.LOST]: 0,
+    };
+
+    for (const score of scores) {
+      distribution[score.segment] += 1;
+    }
+
+    return distribution;
+  }
+
+  private getTopCampaignsPlaceholder(): BriefingCampaignDto[] {
+    return [];
   }
 
   private async getForecast(tenantId: string): Promise<BriefingForecastDto> {
@@ -385,199 +308,6 @@ export class BriefingService {
     );
 
     return forecast;
-  }
-
-  private async getActiveFlowProducts(tenantId: string) {
-    const [products, flows] = await Promise.all([
-      this.prisma.product.findMany({
-        where: {
-          tenantId,
-          isActive: true,
-        },
-        select: {
-          id: true,
-          externalId: true,
-          sku: true,
-          name: true,
-        },
-      }),
-      this.prisma.flow.findMany({
-        where: {
-          tenantId,
-          status: FlowStatus.ACTIVE,
-        },
-        select: {
-          id: true,
-          name: true,
-          nodes: true,
-        },
-      }),
-    ]);
-
-    if (products.length === 0 || flows.length === 0) {
-      return [];
-    }
-
-    const productById = new Map(
-      products.map((product) => [product.id, product]),
-    );
-    const productByExternalId = new Map(
-      products.map((product) => [product.externalId, product]),
-    );
-    const productBySku = new Map(
-      products
-        .filter((product) => product.sku)
-        .map((product) => [product.sku!.toLowerCase(), product]),
-    );
-
-    const counts = new Map<string, number>();
-
-    for (const flow of flows) {
-      const matchedProductIds = new Set<string>();
-      this.collectProductReferences(flow.nodes, matchedProductIds, {
-        productById,
-        productByExternalId,
-        productBySku,
-      });
-
-      for (const productId of matchedProductIds) {
-        counts.set(productId, (counts.get(productId) ?? 0) + 1);
-      }
-    }
-
-    return [...counts.entries()].map(([productId, activeFlows]) => ({
-      productId,
-      name: productById.get(productId)?.name ?? 'Unknown product',
-      activeFlows,
-    }));
-  }
-
-  private collectProductReferences(
-    value: unknown,
-    productIds: Set<string>,
-    indexes: {
-      productById: Map<string, ProductRecord>;
-      productByExternalId: Map<string, ProductRecord>;
-      productBySku: Map<string, ProductRecord>;
-    },
-  ) {
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        this.collectProductReferences(item, productIds, indexes);
-      }
-      return;
-    }
-
-    if (!value || typeof value !== 'object') {
-      return;
-    }
-
-    for (const [key, child] of Object.entries(
-      value as Record<string, unknown>,
-    )) {
-      if (
-        key === 'productId' ||
-        key === 'productIds' ||
-        key === 'productExternalId' ||
-        key === 'productExternalIds' ||
-        key === 'sku' ||
-        key === 'skus'
-      ) {
-        this.registerReference(child, productIds, indexes);
-      }
-
-      this.collectProductReferences(child, productIds, indexes);
-    }
-  }
-
-  private registerReference(
-    value: unknown,
-    productIds: Set<string>,
-    indexes: {
-      productById: Map<string, ProductRecord>;
-      productByExternalId: Map<string, ProductRecord>;
-      productBySku: Map<string, ProductRecord>;
-    },
-  ) {
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        this.registerReference(item, productIds, indexes);
-      }
-      return;
-    }
-
-    if (typeof value !== 'string' || value.length === 0) {
-      return;
-    }
-
-    const product =
-      indexes.productById.get(value) ??
-      indexes.productByExternalId.get(value) ??
-      indexes.productBySku.get(value.toLowerCase()) ??
-      null;
-
-    if (product) {
-      productIds.add(product.id);
-    }
-  }
-
-  private async generateNarrative(
-    tenantId: string,
-    data: BriefingResponseDto & {
-      activeFlowProducts: Array<{
-        productId: string;
-        name: string;
-        activeFlows: number;
-      }>;
-    },
-  ) {
-    const explicitAgentUrl = process.env.NARRATIVE_AGENT_URL;
-    const baseUrl =
-      explicitAgentUrl ?? this.configService.get<string>('NARRATIVE_AGENT_URL');
-    if (
-      (process.env.NODE_ENV === 'test' && !explicitAgentUrl?.trim()) ||
-      !baseUrl
-    ) {
-      return this.buildFallbackNarrative(data);
-    }
-
-    try {
-      const response = await fetch(`${baseUrl}/narrative`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          tenantId,
-          briefing: data,
-        }),
-        signal: AbortSignal.timeout(10000),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Narrative agent returned ${response.status}`);
-      }
-
-      const payload = (await response.json()) as { narrative?: string };
-      if (payload.narrative && payload.narrative.trim().length > 0) {
-        return payload.narrative;
-      }
-    } catch (error) {
-      this.logger.warn(
-        `Narrative fallback for tenant=${tenantId}: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-
-    return this.buildFallbackNarrative(data);
-  }
-
-  private buildFallbackNarrative(data: BriefingResponseDto) {
-    return (
-      `Briefing du ${data.period.date} - ` +
-      `Revenue hier : ${data.yesterday.revenue} EUR (${data.yesterday.orders} cmds). ` +
-      `Attention : ${data.insights[0]?.title ?? 'aucun insight critique'}. ` +
-      `Tendance 30j : ${data.forecast.trend}.`
-    );
   }
 
   private getBriefingCacheKey(tenantId: string) {

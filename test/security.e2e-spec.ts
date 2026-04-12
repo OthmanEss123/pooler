@@ -31,9 +31,8 @@ describe('Security and metrics (e2e)', () => {
       .useValue({
         tenant: { count: jest.fn().mockResolvedValue(3) },
         contact: { count: jest.fn().mockResolvedValue(42) },
-        campaign: { count: jest.fn().mockResolvedValue(7) },
-        emailEvent: { count: jest.fn().mockResolvedValue(21) },
-        flow: { count: jest.fn().mockResolvedValue(5) },
+        order: { count: jest.fn().mockResolvedValue(19) },
+        product: { count: jest.fn().mockResolvedValue(12) },
         insight: { count: jest.fn().mockResolvedValue(9) },
         isHealthy: jest.fn().mockResolvedValue(true),
       })
@@ -48,8 +47,7 @@ describe('Security and metrics (e2e)', () => {
       .overrideProvider(QueueHealthService)
       .useValue({
         getStats: jest.fn().mockResolvedValue({
-          campaign: { waiting: 2, active: 1, failed: 3 },
-          email: { waiting: 4, active: 1, failed: 5 },
+          sync: { waiting: 6, active: 2, failed: 8 },
         }),
       })
       .compile();
@@ -88,11 +86,11 @@ describe('Security and metrics (e2e)', () => {
     expect(response.body).toMatchObject({
       tenantsActive: 3,
       contactsTotal: 42,
-      campaignsSent30d: 7,
-      emailsSent30d: 21,
-      flowsActive: 5,
+      ordersPaid30d: 19,
+      productsActive: 12,
       insightsUnread: 9,
       jobsWaiting: 6,
+      jobsActive: 2,
       jobsFailed: 8,
     });
   });

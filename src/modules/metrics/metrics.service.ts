@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { CampaignStatus, EmailEventType, FlowStatus } from '@prisma/client';
+import { OrderStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma/prisma.service';
 
 @Injectable()
@@ -12,49 +12,31 @@ export class MetricsService {
     const [
       tenantsActive,
       contactsTotal,
-      campaignsSent30d,
-      emailsSent30d,
-      flowsActive,
+      ordersPaid30d,
+      productsActive,
       insightsUnread,
     ] = await Promise.all([
-      this.prisma.tenant.count({
-        where: { isActive: true },
-      }),
+      this.prisma.tenant.count({ where: { isActive: true } }),
       this.prisma.contact.count(),
-      this.prisma.campaign.count({
+      this.prisma.order.count({
         where: {
-          status: CampaignStatus.SENT,
-          sentAt: {
+          status: {
+            in: [OrderStatus.PAID, OrderStatus.FULFILLED],
+          },
+          placedAt: {
             gte: since30Days,
           },
         },
       }),
-      this.prisma.emailEvent.count({
-        where: {
-          type: EmailEventType.SENT,
-          createdAt: {
-            gte: since30Days,
-          },
-        },
-      }),
-      this.prisma.flow.count({
-        where: {
-          status: FlowStatus.ACTIVE,
-        },
-      }),
-      this.prisma.insight.count({
-        where: {
-          isRead: false,
-        },
-      }),
+      this.prisma.product.count({ where: { isActive: true } }),
+      this.prisma.insight.count({ where: { isRead: false } }),
     ]);
 
     return {
       tenantsActive,
       contactsTotal,
-      campaignsSent30d,
-      emailsSent30d,
-      flowsActive,
+      ordersPaid30d,
+      productsActive,
       insightsUnread,
     };
   }

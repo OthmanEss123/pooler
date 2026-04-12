@@ -41,5 +41,4 @@ export class BriefingResponseDto {
   healthScores!: Record<string, number>;
   topCampaigns!: BriefingCampaignDto[];
   forecast!: BriefingForecastDto;
-  narrative!: string;
 }

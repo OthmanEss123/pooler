@@ -14,29 +14,19 @@ import appConfig from './config/app.config';
 import { envValidation } from './config/env.validation';
 import { ClickhouseModule } from './database/clickhouse/clickhouse.module';
 import { PrismaModule } from './database/prisma/prisma.module';
-import { GrpcModule } from './grpc/grpc.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
-import { BillingModule } from './modules/billing/billing.module';
-import { CampaignsModule } from './modules/campaigns/campaigns.module';
 import { CopilotModule } from './modules/copilot/copilot.module';
 import { ContactsModule } from './modules/contacts/contacts.module';
-import { EmailEventsModule } from './modules/email-events/email-events.module';
-import { EmailProviderModule } from './modules/email-provider/email-provider.module';
-import { FlowsModule } from './modules/flows/flows.module';
 import { HealthModule } from './modules/health/health.module';
-import { InsightsModule } from './modules/insights/insights.module';
-import { FacebookAdsModule } from './modules/integrations/facebook-ads/facebook-ads.module';
 import { Ga4Module } from './modules/integrations/ga4/ga4.module';
 import { GoogleAdsModule } from './modules/integrations/google-ads/google-ads.module';
-import { ShopifyModule } from './modules/integrations/shopify/shopify.module';
 import { WooCommerceModule } from './modules/integrations/woocommerce/woocommerce.module';
 import { MembershipsModule } from './modules/memberships/memberships.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { ProductsModule } from './modules/products/products.module';
-import { SegmentsModule } from './modules/segments/segments.module';
 import { TenantsModule } from './modules/tenants/tenants.module';
 import { QueueModule } from './queue/queue.module';
 import { RedisModule } from './redis/redis.module';
@@ -77,12 +67,8 @@ const nodeEnv = process.env.NODE_ENV ?? 'development';
     ClickhouseModule,
     RedisModule,
     AuditLoggingModule,
-    SegmentsModule,
-    CampaignsModule,
-    EmailEventsModule,
     HealthModule,
     AuthModule,
-    BillingModule,
     AuditModule,
     TenantsModule,
     MembershipsModule,
@@ -90,19 +76,13 @@ const nodeEnv = process.env.NODE_ENV ?? 'development';
     CopilotModule,
     OrdersModule,
     ProductsModule,
-    EmailProviderModule,
-    FlowsModule,
     QueueModule,
     AnalyticsModule,
     MetricsModule,
     Ga4Module,
     GoogleAdsModule,
-    FacebookAdsModule,
-    ShopifyModule,
     WooCommerceModule,
     ScheduleModule.forRoot(),
-    InsightsModule,
-    GrpcModule,
   ],
   providers: [
     {

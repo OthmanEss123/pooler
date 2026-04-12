@@ -20,16 +20,6 @@ export class QuotaService {
     }
   }
 
-  async checkEmailQuota(tenantId: string, plannedEmails = 1) {
-    const usage = await this.billingService.getUsage(tenantId);
-
-    if (usage.emailQuota.used + plannedEmails > usage.emailQuota.limit) {
-      throw new ForbiddenException(
-        `Quota email depasse pour le plan ${usage.plan}`,
-      );
-    }
-  }
-
   async getPlan(tenantId: string) {
     const subscription = await this.prisma.billingSubscription.findUnique({
       where: { tenantId },

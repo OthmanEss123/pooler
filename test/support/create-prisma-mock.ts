@@ -368,6 +368,17 @@ export const createPrismaMock = () => {
   const memberships: MockMembership[] = [];
   const refreshTokens: MockRefreshToken[] = [];
   const apiKeys: MockApiKey[] = [];
+  const invitationTokens: Array<{
+    id: string;
+    tenantId: string;
+    email: string;
+    role: UserRole;
+    token: string;
+    expiresAt: Date;
+    usedAt: Date | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }> = [];
   const contacts: MockContact[] = [];
   const segments: MockSegment[] = [];
   const segmentMembers: MockSegmentMember[] = [];
@@ -410,6 +421,7 @@ export const createPrismaMock = () => {
   let membershipCounter = 1;
   let refreshTokenCounter = 1;
   let apiKeyCounter = 1;
+  let invitationTokenCounter = 1;
   let contactCounter = 1;
   let segmentCounter = 1;
   let adAudienceCounter = 1;
@@ -566,6 +578,22 @@ export const createPrismaMock = () => {
           }
 
           return user;
+        },
+      ),
+      findFirst: jest.fn(
+        async ({ where }: { where?: { verifyToken?: string } }) => {
+          return (
+            users.find((candidate) => {
+              if (
+                where?.verifyToken !== undefined &&
+                candidate.verifyToken !== where.verifyToken
+              ) {
+                return false;
+              }
+
+              return true;
+            }) ?? null
+          );
         },
       ),
       create: jest.fn(
@@ -1888,6 +1916,170 @@ export const createPrismaMock = () => {
         },
       ),
     },
+    invitationToken: {
+      findFirst: jest.fn(
+        async ({
+          where,
+          orderBy,
+        }: {
+          where?: {
+            id?: string;
+            tenantId?: string;
+            email?: string;
+            usedAt?: null;
+            expiresAt?: { gt?: Date };
+          };
+          orderBy?: { createdAt: 'asc' | 'desc' };
+        }) => {
+          const filtered = invitationTokens.filter((candidate) => {
+            if (where?.id && candidate.id !== where.id) {
+              return false;
+            }
+            if (where?.tenantId && candidate.tenantId !== where.tenantId) {
+              return false;
+            }
+            if (where?.email && candidate.email !== where.email) {
+              return false;
+            }
+            if (where?.usedAt === null && candidate.usedAt !== null) {
+              return false;
+            }
+            if (
+              where?.expiresAt?.gt !== undefined &&
+              !(candidate.expiresAt > where.expiresAt.gt)
+            ) {
+              return false;
+            }
+
+            return true;
+          });
+
+          filtered.sort((left, right) =>
+            orderBy?.createdAt === 'asc'
+              ? left.createdAt.getTime() - right.createdAt.getTime()
+              : right.createdAt.getTime() - left.createdAt.getTime(),
+          );
+
+          return filtered[0] ?? null;
+        },
+      ),
+      findMany: jest.fn(
+        async ({
+          where,
+          orderBy,
+        }: {
+          where?: { tenantId?: string };
+          orderBy?: { createdAt: 'asc' | 'desc' };
+        }) => {
+          const filtered = invitationTokens.filter((candidate) => {
+            if (where?.tenantId && candidate.tenantId !== where.tenantId) {
+              return false;
+            }
+
+            return true;
+          });
+
+          filtered.sort((left, right) =>
+            orderBy?.createdAt === 'asc'
+              ? left.createdAt.getTime() - right.createdAt.getTime()
+              : right.createdAt.getTime() - left.createdAt.getTime(),
+          );
+
+          return filtered;
+        },
+      ),
+      findUnique: jest.fn(
+        async ({
+          where,
+          include,
+        }: {
+          where: { id?: string; token?: string };
+          include?: { tenant?: boolean };
+        }) => {
+          const invitation =
+            invitationTokens.find((candidate) => candidate.id === where.id) ??
+            invitationTokens.find(
+              (candidate) => candidate.token === where.token,
+            ) ??
+            null;
+
+          if (!invitation) {
+            return null;
+          }
+
+          if (!include?.tenant) {
+            return invitation;
+          }
+
+          const tenant =
+            tenants.find((candidate) => candidate.id === invitation.tenantId) ??
+            null;
+
+          return tenant ? { ...invitation, tenant } : null;
+        },
+      ),
+      create: jest.fn(
+        async ({
+          data,
+        }: {
+          data: {
+            tenantId: string;
+            email: string;
+            role: UserRole;
+            token: string;
+            expiresAt: Date;
+          };
+        }) => {
+          const now = new Date();
+          const invitation = {
+            id: `invitation-${invitationTokenCounter++}`,
+            tenantId: data.tenantId,
+            email: data.email,
+            role: data.role,
+            token: data.token,
+            expiresAt: data.expiresAt,
+            usedAt: null,
+            createdAt: now,
+            updatedAt: now,
+          };
+
+          invitationTokens.push(invitation);
+          return invitation;
+        },
+      ),
+      update: jest.fn(
+        async ({
+          where,
+          data,
+        }: {
+          where: { id: string };
+          data: { usedAt?: Date | null };
+        }) => {
+          const invitation = invitationTokens.find(
+            (candidate) => candidate.id === where.id,
+          );
+
+          if (!invitation) {
+            throw new Error('Invitation not found');
+          }
+
+          Object.assign(invitation, data, { updatedAt: new Date() });
+          return invitation;
+        },
+      ),
+      delete: jest.fn(async ({ where }: { where: { id: string } }) => {
+        const index = invitationTokens.findIndex(
+          (candidate) => candidate.id === where.id,
+        );
+
+        if (index === -1) {
+          throw new Error('Invitation not found');
+        }
+
+        const [invitation] = invitationTokens.splice(index, 1);
+        return invitation;
+      }),
+    },
     integration: {
       findUnique: jest.fn(
         async ({
@@ -2125,6 +2317,10 @@ export const createPrismaMock = () => {
           return { count };
         },
       ),
+    },
+    __stores: {
+      users,
+      invitationTokens,
     },
     $transaction: async <T>(
       input: Promise<unknown>[] | ((tx: typeof prismaMock) => Promise<T>),

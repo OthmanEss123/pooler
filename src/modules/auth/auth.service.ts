@@ -14,7 +14,6 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import * as bcrypt from 'bcrypt';
 import { AuditService } from '../../common/services/audit.service';
 import { PrismaService } from '../../database/prisma/prisma.service';
-import { EmailProviderService } from '../email-provider/email-provider.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { MfaService } from './services/mfa.service';
@@ -38,7 +37,6 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly auditService: AuditService,
     private readonly configService: ConfigService,
-    private readonly emailProvider: EmailProviderService,
     private readonly mfaService: MfaService,
   ) {
     this.frontendUrl = this.configService.get<string>(
@@ -165,7 +163,7 @@ export class AuthService {
 
     this.sendVerificationEmail(user.id, user.email).catch((err) =>
       this.logger.error(
-        `Failed to send verification email: ${err instanceof Error ? err.message : 'Unknown'}`,
+        `Failed to prepare verification email: ${err instanceof Error ? err.message : 'Unknown'}`,
       ),
     );
 
@@ -686,24 +684,7 @@ export class AuthService {
     });
 
     const verifyUrl = `${this.frontendUrl}/verify-email?token=${token}`;
-
-    await this.emailProvider.sendEmail({
-      to: email,
-      subject: 'Verifiez votre email — Pilot',
-      htmlBody: `
-        <div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:20px">
-          <h2>Bienvenue sur Pilot</h2>
-          <p>Cliquez sur le bouton ci-dessous pour verifier votre adresse email :</p>
-          <a href="${verifyUrl}" style="display:inline-block;padding:12px 24px;background:#4F46E5;color:#fff;text-decoration:none;border-radius:6px">Verifier mon email</a>
-          <p style="color:#999;font-size:12px;margin-top:20px">Ce lien expire dans 24 heures.</p>
-        </div>
-      `,
-      fromName: 'Pilot',
-      fromEmail: this.configService.get<string>(
-        'SES_FROM_DEFAULT',
-        'noreply@pilot.local',
-      ),
-    });
+    this.logger.log(`Verification URL prepared for ${email}: ${verifyUrl}`);
   }
 
   async switchTenant(userId: string, targetTenantId: string) {

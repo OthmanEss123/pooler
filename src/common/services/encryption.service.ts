@@ -9,7 +9,7 @@ const TEST_ENCRYPTION_KEY =
 
 /**
  * AES-256-CBC encryption service for storing external credentials
- * (Shopify tokens, Google OAuth tokens, SES keys, etc.)
+ * (external credentials such as Google OAuth tokens and API secrets)
  *
  * Format: <iv_hex>:<encrypted_hex>
  */
@@ -62,7 +62,7 @@ export class EncryptionService {
   }
 
   /**
-   * Encrypt a JSON object (e.g., Shopify credentials, OAuth tokens).
+   * Encrypt a JSON object (for example, OAuth credentials or integration secrets).
    */
   encryptJson(data: Record<string, unknown>): string {
     return this.encrypt(JSON.stringify(data));

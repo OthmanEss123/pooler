@@ -1,103 +1,66 @@
-﻿from statistics import mean
-
-from apps.agents.shared.base_agent import BaseAgent
-from apps.agents.shared.grpc_client import contacts_pb2, intelligence_pb2
+from statistics import mean
 
 
-class IntelligenceAgent(BaseAgent):
-    def calculate_health_scores(self, tenant_id: str, segment_id: str):
-        response = self.contacts_stub.GetSegmentContacts(
-            contacts_pb2.GetSegmentRequest(
-                tenantId=tenant_id,
-                segmentId=segment_id,
-            )
-        )
+class IntelligenceAgent:
+    def detect_anomalies(self, tenant_id: str, metrics: dict | None = None):
+        payload = metrics or {}
+        revenue = float(payload.get("revenue", 0) or 0)
+        roas = float(payload.get("roas", 0) or 0)
+        sessions = float(payload.get("sessions", 0) or 0)
+        orders = float(payload.get("orders", 0) or 0)
 
-        updated = []
+        anomalies: list[dict] = []
 
-        for contact in response.contacts:
-            score = 50.0
-
-            if contact.email:
-                score += 10
-            if contact.phone:
-                score += 10
-            if contact.firstName:
-                score += 5
-            if contact.lastName:
-                score += 5
-
-            score = min(score, 100)
-
-            self.contacts_stub.UpdateHealthScore(
-                contacts_pb2.UpdateHealthScoreRequest(
-                    tenantId=tenant_id,
-                    contactId=contact.id,
-                    score=score,
-                )
-            )
-
-            updated.append(
+        if revenue <= 0:
+            anomalies.append(
                 {
-                    "contactId": contact.id,
-                    "score": score,
+                    "type": "revenue",
+                    "severity": "high",
+                    "message": "No revenue was reported for the requested period.",
+                }
+            )
+        elif revenue < 100:
+            anomalies.append(
+                {
+                    "type": "revenue",
+                    "severity": "medium",
+                    "message": "Revenue is very low compared with a healthy daily baseline.",
+                }
+            )
+
+        if roas and roas < 1:
+            anomalies.append(
+                {
+                    "type": "roas",
+                    "severity": "high",
+                    "message": "ROAS is below 1.0, so ads are not paying back current spend.",
+                }
+            )
+
+        if sessions > 0 and orders == 0:
+            anomalies.append(
+                {
+                    "type": "conversion",
+                    "severity": "medium",
+                    "message": "Traffic is present but no orders were recorded.",
                 }
             )
 
         return {
-            "updated": updated,
-            "count": len(updated),
+            "tenantId": tenant_id,
+            "status": "anomaly_detected" if anomalies else "ok",
+            "anomalies": anomalies,
         }
 
-    def detect_anomalies(self, tenant_id: str):
-        summary = self.intelligence_stub.GetAnalyticsSummary(
-            intelligence_pb2.AnalyticsRequest(
-                tenantId=tenant_id,
-                days=7,
-            )
-        )
-
-        if summary.revenue < 100:
-            insight = self.intelligence_stub.PushInsight(
-                intelligence_pb2.PushInsightRequest(
-                    tenantId=tenant_id,
-                    type="anomaly",
-                    title="Low revenue detected",
-                    description=f"Revenue in the last 7 days is low: {summary.revenue}",
-                    severity="high",
-                )
-            )
-            return {
-                "status": "anomaly_detected",
-                "insightId": insight.id,
-            }
+    def forecast_revenue(self, tenant_id: str, days: int, revenue_history: list[float] | None = None):
+        history = [float(value) for value in (revenue_history or [])]
+        baseline = mean(history) if history else 0.0
+        daily_forecast = [round(baseline, 2) for _ in range(max(days, 0))]
+        predicted_revenue = round(sum(daily_forecast), 2)
 
         return {
-            "status": "ok",
-        }
-
-    def forecast_revenue(self, tenant_id: str, days: int):
-        forecast = self.intelligence_stub.GetRevenueForecast(
-            intelligence_pb2.ForecastRequest(
-                tenantId=tenant_id,
-                days=days,
-            )
-        )
-
-        avg = mean(forecast.dailyForecast) if forecast.dailyForecast else 0
-
-        self.intelligence_stub.PushInsight(
-            intelligence_pb2.PushInsightRequest(
-                tenantId=tenant_id,
-                type="forecast",
-                title="Revenue forecast generated",
-                description=f"Predicted revenue for {days} days: {forecast.predictedRevenue}, daily avg: {avg}",
-                severity="info",
-            )
-        )
-
-        return {
-            "predictedRevenue": forecast.predictedRevenue,
-            "dailyForecast": list(forecast.dailyForecast),
-            "model": forecast.model,
+            "tenantId": tenant_id,
+            "predictedRevenue": predicted_revenue,
+            "dailyForecast": daily_forecast,
+            "model": "moving_average",
         }

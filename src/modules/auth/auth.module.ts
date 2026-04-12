@@ -1,11 +1,10 @@
-import { Module } from '@nestjs/common';
+﻿import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import type { StringValue } from 'ms';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { EncryptionModule } from '../../common/services/encryption.module';
-import { EmailProviderModule } from '../email-provider/email-provider.module';
 import { AuthController } from './auth.controller';
 import { AuthCronService } from './auth-cron.service';
 import { AuthService } from './auth.service';
@@ -17,7 +16,6 @@ import { JwtStrategy } from './strategies/jwt.strategy';
   imports: [
     ConfigModule,
     EncryptionModule,
-    EmailProviderModule,
     PassportModule.register({
       defaultStrategy: 'jwt',
     }),

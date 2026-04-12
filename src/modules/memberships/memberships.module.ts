@@ -1,13 +1,12 @@
-import { Module } from '@nestjs/common';
+﻿import { Module } from '@nestjs/common';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { PrismaModule } from '../../database/prisma/prisma.module';
-import { EmailProviderModule } from '../email-provider/email-provider.module';
 import { MembershipInvitationsController } from './membership-invitations.controller';
 import { MembershipsController } from './memberships.controller';
 import { MembershipsService } from './memberships.service';
 
 @Module({
-  imports: [PrismaModule, EmailProviderModule],
+  imports: [PrismaModule],
   controllers: [MembershipsController, MembershipInvitationsController],
   providers: [MembershipsService, RolesGuard],
   exports: [MembershipsService],

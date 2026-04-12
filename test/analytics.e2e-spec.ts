@@ -1,4 +1,5 @@
-﻿import { INestApplication, ValidationPipe } from '@nestjs/common';
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
 import type { Server } from 'node:http';
@@ -103,7 +104,8 @@ describe('AnalyticsController (e2e)', () => {
         {
           totalRevenue: 1200,
           totalOrders: 15,
-          emailRevenue: 320,
+          totalSessions: 640,
+          newContacts: 18,
         },
       ])
       .mockResolvedValueOnce([{ adsSpend: 400 }])
@@ -118,7 +120,8 @@ describe('AnalyticsController (e2e)', () => {
     expect(response.body).toEqual({
       totalRevenue: 1200,
       totalOrders: 15,
-      emailRevenue: 320,
+      totalSessions: 640,
+      newContacts: 18,
       adsSpend: 400,
       blendedRoas: 3,
       mer: 3,
@@ -137,8 +140,8 @@ describe('AnalyticsController (e2e)', () => {
 
   it('GET /api/v1/analytics/revenue -> 200', async () => {
     clickhouseMock.query.mockResolvedValueOnce([
-      { period: '2026-03-01', revenue: 100, orders: 2 },
-      { period: '2026-03-02', revenue: 200, orders: 3 },
+      { period: '2026-03-01', revenue: 100, orders: 2, sessions: 20 },
+      { period: '2026-03-02', revenue: 200, orders: 3, sessions: 35 },
     ]);
 
     const response = await request(app.getHttpServer())
@@ -149,8 +152,8 @@ describe('AnalyticsController (e2e)', () => {
       .expect(200);
 
     expect(response.body).toEqual([
-      { period: '2026-03-01', revenue: 100, orders: 2 },
-      { period: '2026-03-02', revenue: 200, orders: 3 },
+      { period: '2026-03-01', revenue: 100, orders: 2, sessions: 20 },
+      { period: '2026-03-02', revenue: 200, orders: 3, sessions: 35 },
     ]);
   });
 
@@ -167,29 +170,13 @@ describe('AnalyticsController (e2e)', () => {
     expect(response.body).toEqual([{ date: '2026-03-01', roas: 5, mer: 5 }]);
   });
 
-  it('GET /api/v1/analytics/email-funnel -> 200', async () => {
-    clickhouseMock.query.mockResolvedValueOnce([
-      { type: 'SENT', count: 100 },
-      { type: 'OPENED', count: 60 },
-      { type: 'CLICKED', count: 20 },
-    ]);
-
-    const response = await request(app.getHttpServer())
-      .get('/api/v1/analytics/email-funnel')
-      .set('Cookie', cookies)
-      .expect(200);
-
-    expect(response.body).toEqual([
-      { type: 'SENT', count: 100 },
-      { type: 'OPENED', count: 60 },
-      { type: 'CLICKED', count: 20 },
-    ]);
-  });
-
   it('POST /api/v1/analytics/ingest/daily -> 201', async () => {
     prismaMock.order.findMany.mockResolvedValueOnce([
       { id: 'order-1', totalAmount: 250 },
       { id: 'order-2', totalAmount: 50 },
+    ]);
+    clickhouseMock.query.mockResolvedValueOnce([
+      { sessions: 12, newContacts: 3 },
     ]);
     clickhouseMock.insert.mockResolvedValueOnce(undefined);
 
@@ -205,12 +192,13 @@ describe('AnalyticsController (e2e)', () => {
     });
     expect(clickhouseMock.insert).toHaveBeenCalledWith('metrics_daily', [
       {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         tenant_id: expect.any(String),
         date: '2026-03-10',
         revenue: 300,
         orders: 2,
-        email_revenue: 0,
+        ads_spend: 0,
+        sessions: 12,
+        new_contacts: 3,
       },
     ]);
   });

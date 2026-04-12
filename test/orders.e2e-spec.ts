@@ -1,4 +1,4 @@
-﻿/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
@@ -97,7 +97,7 @@ describe('Orders (e2e)', () => {
         .set('Cookie', cookies)
         .send({
           contactEmail,
-          externalId: 'shopify-1001',
+          externalId: 'woocommerce-1001',
           orderNumber: '#1001',
           status: 'PAID',
           totalAmount: 150,

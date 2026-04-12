@@ -243,7 +243,6 @@ export class Ga4Service {
         date: params.date,
         revenue: params.revenue,
         orders: params.orders,
-        email_revenue: 0,
         ads_spend: 0,
         sessions: params.sessions,
         new_contacts: params.newContacts,

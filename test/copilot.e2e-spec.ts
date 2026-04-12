@@ -8,8 +8,6 @@ import { AppModule } from '../src/app.module';
 import { ClickhouseService } from '../src/database/clickhouse/clickhouse.service';
 import { PrismaService } from '../src/database/prisma/prisma.service';
 import { CopilotService } from '../src/modules/copilot/copilot.service';
-import { StockAlertService } from '../src/modules/copilot/stock-alert.service';
-import { InsightsService } from '../src/modules/insights/insights.service';
 import { createPrismaMock, toCookieHeader } from './support/create-prisma-mock';
 
 process.env.NODE_ENV ??= 'test';
@@ -21,85 +19,29 @@ process.env.CLICKHOUSE_URL ??= 'http://default:password@localhost:8123/pilot';
 process.env.JWT_SECRET ??=
   '1234567890123456789012345678901234567890123456789012345678901234';
 process.env.JWT_EXPIRES_IN ??= '15m';
-process.env.NARRATIVE_AGENT_URL = '';
 
 describe('Copilot (e2e)', () => {
   let app: INestApplication<Server>;
   let cookies: string[] = [];
 
   const prismaMock = createPrismaMock() as any;
-  const insightsStore: Array<Record<string, unknown>> = [];
-
-  const insightsServiceMock = {
-    findAll: jest.fn((tenantId: string, unreadOnly?: boolean) =>
-      insightsStore.filter((item) => {
-        if (item.tenantId !== tenantId) {
-          return false;
-        }
-
-        if (unreadOnly && item.isRead === true) {
-          return false;
-        }
-
-        return true;
-      }),
-    ),
-    markAsRead: jest.fn(),
-    remove: jest.fn(),
-    generateInsights: jest.fn((tenantId: string) => {
-      if (insightsStore.length === 0) {
-        insightsStore.push({
-          id: 'insight-1',
-          tenantId,
-          type: 'AD_WASTE',
-          title: 'Budget ads a surveiller',
-          impact: 250,
-          isRead: false,
-          createdAt: new Date().toISOString(),
-        });
-      }
-
-      return { created: 1 };
-    }),
-  };
-
-  const stockAlertServiceMock = {
-    detectLowStock: jest.fn(() => ({ created: 0 })),
-  };
 
   const copilotServiceMock = {
-    getRecommendations: jest.fn(() =>
-      insightsStore.map((insight) => ({
-        id: insight.id,
-        type: insight.type,
-        title: insight.title,
-        action: 'Pauser la campagne ads',
+    getRecommendations: jest.fn(() => [
+      {
+        id: 'insight-1',
+        type: 'AD_WASTE',
+        title: 'Budget ads a surveiller',
+        action: 'Revoir les campagnes avec le ROAS le plus faible.',
         priority: 'HIGH',
-        impact: insight.impact,
-        createdAt: insight.createdAt,
-      })),
-    ),
+        impact: 250,
+        createdAt: new Date().toISOString(),
+      },
+    ]),
     ask: jest.fn((_tenantId: string, question: string) => ({
       answer: `Service temporairement indisponible. Question recue: ${question}`,
-      reasoning: '',
-      actions: [],
-    })),
-    suggestCampaign: jest.fn((_tenantId: string, goal: string) => ({
-      subjectSuggestions: [
-        `${goal} - offre exclusive cette semaine`,
-        'Relance intelligente pour votre audience',
-        'Derniere chance avant la fin de semaine',
-      ],
-      bodyHints: ['Mettre un CTA clair'],
-      recommendedSegment: 'AT_RISK',
-      bestSendTime: 'mardi 10h',
-      estimatedOpenRate: '18-22%',
-      estimatedRevenue: 420,
       reasoning: 'Fallback local.',
-    })),
-    getNarrative: jest.fn(() => ({
-      narrative: 'Narrative mock du matin',
-      generatedAt: new Date().toISOString(),
+      actions: [],
     })),
   };
 
@@ -120,10 +62,6 @@ describe('Copilot (e2e)', () => {
       .useValue({
         isHealthy: jest.fn().mockResolvedValue(true),
       })
-      .overrideProvider(InsightsService)
-      .useValue(insightsServiceMock)
-      .overrideProvider(StockAlertService)
-      .useValue(stockAlertServiceMock)
       .overrideProvider(CopilotService)
       .useValue(copilotServiceMock)
       .compile();
@@ -159,11 +97,6 @@ describe('Copilot (e2e)', () => {
   });
 
   it('GET /api/v1/copilot/recommendations -> 200 actionable list', async () => {
-    await request(app.getHttpServer())
-      .post('/api/v1/insights/generate')
-      .set('Cookie', cookies)
-      .expect(200);
-
     const response = await request(app.getHttpServer())
       .get('/api/v1/copilot/recommendations')
       .set('Cookie', cookies)
@@ -172,7 +105,7 @@ describe('Copilot (e2e)', () => {
     expect(Array.isArray(response.body)).toBe(true);
     expect(response.body[0]).toMatchObject({
       type: 'AD_WASTE',
-      action: 'Pauser la campagne ads',
+      action: 'Revoir les campagnes avec le ROAS le plus faible.',
       priority: 'HIGH',
     });
   });
@@ -192,6 +125,7 @@ describe('Copilot (e2e)', () => {
       .expect(200);
 
     expect(typeof response.body.answer).toBe('string');
+    expect(typeof response.body.reasoning).toBe('string');
   });
 
   it('POST /api/v1/copilot/ask -> 400 if question too short', async () => {
@@ -200,40 +134,5 @@ describe('Copilot (e2e)', () => {
       .set('Cookie', cookies)
       .send({ question: 'ab' })
       .expect(400);
-  });
-
-  it('POST /api/v1/copilot/campaign-suggest -> 200 suggestion payload', async () => {
-    const response = await request(app.getHttpServer())
-      .post('/api/v1/copilot/campaign-suggest')
-      .set('Cookie', cookies)
-      .send({ goal: 'Re-engager les inactifs' })
-      .expect(200);
-
-    expect(response.body.subjectSuggestions.length).toBeGreaterThanOrEqual(1);
-    expect(typeof response.body.recommendedSegment).toBe('string');
-  });
-
-  it('POST /api/v1/copilot/campaign-suggest -> 400 if goal is empty', async () => {
-    await request(app.getHttpServer())
-      .post('/api/v1/copilot/campaign-suggest')
-      .set('Cookie', cookies)
-      .send({ goal: '' })
-      .expect(400);
-  });
-
-  it('GET /api/v1/copilot/narrative -> 200', async () => {
-    const response = await request(app.getHttpServer())
-      .get('/api/v1/copilot/narrative')
-      .set('Cookie', cookies)
-      .expect(200);
-
-    expect(typeof response.body.narrative).toBe('string');
-    expect(typeof response.body.generatedAt).toBe('string');
-  });
-
-  it('GET /api/v1/copilot/narrative -> 401 sans auth', async () => {
-    await request(app.getHttpServer())
-      .get('/api/v1/copilot/narrative')
-      .expect(401);
   });
 });

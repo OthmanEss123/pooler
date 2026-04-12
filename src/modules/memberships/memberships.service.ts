@@ -1,4 +1,4 @@
-import {
+﻿import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
@@ -9,7 +9,6 @@ import { ConfigService } from '@nestjs/config';
 import { UserRole } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../../database/prisma/prisma.service';
-import { EmailProviderService } from '../email-provider/email-provider.service';
 import { InviteMemberDto } from './dto/invite-member.dto';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
 
@@ -20,7 +19,6 @@ export class MembershipsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
-    private readonly emailProvider: EmailProviderService,
   ) {
     this.frontendUrl = this.configService.get<string>(
       'FRONTEND_URL',
@@ -115,6 +113,7 @@ export class MembershipsService {
         email: normalizedEmail,
         role: pendingInvitation.role,
         expiresAt: pendingInvitation.expiresAt,
+        inviteUrl: `${this.frontendUrl}/accept-invite?token=${pendingInvitation.token}`,
       };
     }
 
@@ -128,33 +127,13 @@ export class MembershipsService {
       },
     });
 
-    const inviteUrl = `${this.frontendUrl}/accept-invite?token=${invitation.token}`;
-
-    await this.emailProvider.sendEmail({
-      to: normalizedEmail,
-      subject: `Invitation - ${tenant.name}`,
-      htmlBody: `
-        <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:24px">
-          <h2>Invitation a rejoindre ${tenant.name}</h2>
-          <p>Vous etes invite a rejoindre ${tenant.name} en tant que ${role}.</p>
-          <p><a href="${inviteUrl}" style="display:inline-block;padding:12px 24px;background:#111827;color:#fff;text-decoration:none;border-radius:6px">Accepter l'invitation</a></p>
-          <p style="font-size:12px;color:#6b7280">Ce lien expire dans 7 jours.</p>
-        </div>
-      `,
-      textBody: `Vous etes invite a rejoindre ${tenant.name} en tant que ${role}. Accepter: ${inviteUrl}`,
-      fromName: 'Pilot',
-      fromEmail: this.configService.get<string>(
-        'SES_FROM_DEFAULT',
-        'noreply@pilot.local',
-      ),
-    });
-
     return {
       invited: true,
       pending: true,
       email: normalizedEmail,
       role,
       expiresAt: invitation.expiresAt,
+      inviteUrl: `${this.frontendUrl}/accept-invite?token=${invitation.token}`,
     };
   }
 

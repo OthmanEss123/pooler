@@ -1,4 +1,4 @@
-version: ''3.9''
+version: '3.9'
 
 services:
   api:
@@ -8,8 +8,7 @@ services:
     env_file:
       - .env
     ports:
-      - ''3000:3000''
-      - ''50051:50051''
+      - '3000:3000'
     depends_on:
       - postgres
       - redis
@@ -23,7 +22,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      - ''5432:5432''
+      - '5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
@@ -31,14 +30,14 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     ports:
-      - ''6379:6379''
+      - '6379:6379'
 
   clickhouse:
     image: clickhouse/clickhouse-server:latest
     restart: unless-stopped
     ports:
-      - ''8123:8123''
-      - ''9000:9000''
+      - '8123:8123'
+      - '9000:9000'
     volumes:
       - clickhouse_data:/var/lib/clickhouse
 

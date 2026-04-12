@@ -1,5 +1,9 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import {
+  INestApplication,
+  UnauthorizedException,
+  ValidationPipe,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
 import type { Server } from 'node:http';
@@ -8,7 +12,6 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { ClickhouseService } from '../src/database/clickhouse/clickhouse.service';
 import { PrismaService } from '../src/database/prisma/prisma.service';
-import { EmailProviderService } from '../src/modules/email-provider/email-provider.service';
 import { MfaService } from '../src/modules/auth/services/mfa.service';
 import { createPrismaMock, toCookieHeader } from './support/create-prisma-mock';
 
@@ -23,7 +26,6 @@ process.env.JWT_SECRET ??=
 process.env.JWT_EXPIRES_IN ??= '15m';
 process.env.ENCRYPTION_KEY ??=
   '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
-process.env.NARRATIVE_AGENT_URL = '';
 
 describe('MFA (e2e)', () => {
   let app: INestApplication<Server>;
@@ -32,7 +34,6 @@ describe('MFA (e2e)', () => {
 
   const prismaMock = createPrismaMock() as any;
 
-  // Pseudo TOTP secret persisted by the mocked MfaService.
   let storedSecret: string | null = null;
   let mfaEnabledFlag = false;
 
@@ -53,13 +54,11 @@ describe('MFA (e2e)', () => {
 
     enable: jest.fn(async (_uid: string, token: string) => {
       if (!storedSecret) {
-        throw new Error('MFA not initialized');
+        throw new UnauthorizedException('MFA not initialized');
       }
       const result = await verify({ token, secret: storedSecret });
       if (!result.valid) {
-        const error = new Error('Invalid TOTP') as Error & { status?: number };
-        error.status = 401;
-        throw error;
+        throw new UnauthorizedException('Invalid TOTP');
       }
       mfaEnabledFlag = true;
       return { enabled: true };
@@ -67,20 +66,14 @@ describe('MFA (e2e)', () => {
 
     disable: jest.fn(async (_uid: string, token: string, password: string) => {
       if (!storedSecret) {
-        throw new Error('MFA not initialized');
+        throw new UnauthorizedException('MFA not initialized');
       }
       if (password !== 'Password123!') {
-        const error = new Error('Invalid password') as Error & {
-          status?: number;
-        };
-        error.status = 401;
-        throw error;
+        throw new UnauthorizedException('Invalid password');
       }
       const result = await verify({ token, secret: storedSecret });
       if (!result.valid) {
-        const error = new Error('Invalid TOTP') as Error & { status?: number };
-        error.status = 401;
-        throw error;
+        throw new UnauthorizedException('Invalid TOTP');
       }
       storedSecret = null;
       mfaEnabledFlag = false;
@@ -93,13 +86,6 @@ describe('MFA (e2e)', () => {
       }
       const result = await verify({ token, secret: storedSecret });
       return result.valid;
-    }),
-  };
-
-  const emailProviderMock = {
-    sendEmail: jest.fn().mockResolvedValue({
-      messageId: 'mock-message-id',
-      provider: 'mock',
     }),
   };
 
@@ -118,8 +104,6 @@ describe('MFA (e2e)', () => {
       .useValue(prismaMock)
       .overrideProvider(ClickhouseService)
       .useValue({ isHealthy: jest.fn().mockResolvedValue(true) })
-      .overrideProvider(EmailProviderService)
-      .useValue(emailProviderMock)
       .overrideProvider(MfaService)
       .useValue(mfaServiceMock)
       .compile();
@@ -210,7 +194,6 @@ describe('MFA (e2e)', () => {
 
   describe('POST /auth/mfa/verify (login flow)', () => {
     it('200 - second facteur valide -> retourne user', async () => {
-      // Setup + enable MFA
       await request(app.getHttpServer())
         .post('/api/v1/auth/mfa/setup')
         .set('Cookie', cookies)
@@ -223,14 +206,12 @@ describe('MFA (e2e)', () => {
         .send({ token: validToken })
         .expect(200);
 
-      // Active mfaEnabled cote prisma pour que login le declenche
       const updateUser = prismaMock.user.update as jest.Mock;
       await updateUser({
         where: { id: userId },
         data: { mfaEnabled: true },
       });
 
-      // Login -> doit demander MFA
       const loginResponse = await request(app.getHttpServer())
         .post('/api/v1/auth/login')
         .send({ email: owner.email, password: owner.password })
@@ -240,7 +221,6 @@ describe('MFA (e2e)', () => {
       const mfaTempToken = loginResponse.body.mfaTempToken as string;
       expect(typeof mfaTempToken).toBe('string');
 
-      // Verify MFA
       const newCode = await generate({ secret: storedSecret as string });
       const verifyResponse = await request(app.getHttpServer())
         .post('/api/v1/auth/mfa/verify')

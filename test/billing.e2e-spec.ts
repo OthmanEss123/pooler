@@ -108,7 +108,7 @@ describe('Billing (e2e)', () => {
 
     expect(response.body.plan).toBe('STARTER');
     expect(response.body.contacts.used).toBeGreaterThanOrEqual(2);
-    expect(response.body.emailQuota.limit).toBeGreaterThan(0);
+    expect(response.body.contacts.limit).toBeGreaterThan(0);
   });
 
   it('POST /billing/subscribe -> 200 for owner', async () => {
@@ -151,31 +151,6 @@ describe('Billing (e2e)', () => {
       .post('/api/v1/contacts')
       .set('Cookie', cookies)
       .send({ email: 'quota-hit@example.com' })
-      .expect(403);
-  });
-
-  it('POST /campaigns/:id/send -> 403 when email quota is reached', async () => {
-    (prisma as unknown as Record<string, unknown>).campaign = {
-      findFirst: jest.fn().mockResolvedValue({
-        id: 'campaign-quota',
-        tenantId,
-        segmentId: 'segment-quota',
-        status: 'DRAFT',
-      }),
-      update: jest.fn().mockResolvedValue({
-        id: 'campaign-quota',
-        tenantId,
-        segmentId: 'segment-quota',
-        status: 'DRAFT',
-      }),
-    };
-
-    (prisma.segmentMember.count as jest.Mock).mockResolvedValueOnce(25);
-    (prisma.emailEvent.count as jest.Mock).mockResolvedValueOnce(100000);
-
-    await request(app.getHttpServer())
-      .post('/api/v1/campaigns/campaign-quota/send')
-      .set('Cookie', cookies)
       .expect(403);
   });
 

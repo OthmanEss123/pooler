@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument */
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
@@ -7,9 +7,7 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { ClickhouseService } from '../src/database/clickhouse/clickhouse.service';
 import { PrismaService } from '../src/database/prisma/prisma.service';
-import { EmailProviderService } from '../src/modules/email-provider/email-provider.service';
-import { createCompliancePrismaMock } from './support/create-compliance-prisma-mock';
-import { toCookieHeader } from './support/create-prisma-mock';
+import { createPrismaMock, toCookieHeader } from './support/create-prisma-mock';
 
 process.env.NODE_ENV ??= 'test';
 process.env.DATABASE_URL ??=
@@ -26,13 +24,7 @@ describe('Auth verification and invitations (e2e)', () => {
   let ownerCookies: string[] = [];
   let ownerTenantId = '';
 
-  const prismaMock = createCompliancePrismaMock();
-  const emailProviderMock = {
-    sendEmail: jest.fn().mockResolvedValue({
-      messageId: 'test-message',
-      provider: 'ses',
-    }),
-  };
+  const prismaMock = createPrismaMock() as any;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -44,8 +36,6 @@ describe('Auth verification and invitations (e2e)', () => {
       .useValue({
         isHealthy: jest.fn().mockResolvedValue(true),
       })
-      .overrideProvider(EmailProviderService)
-      .useValue(emailProviderMock)
       .compile();
 
     app = moduleFixture.createNestApplication();
@@ -91,8 +81,8 @@ describe('Auth verification and invitations (e2e)', () => {
       .expect({ sent: true });
 
     const ownerUser = Array.from(prismaMock.__stores.users.values()).find(
-      (candidate) => candidate.email === 'owner@verification.test',
-    );
+      (candidate: any) => candidate.email === 'owner@verification.test',
+    ) as any;
     expect(ownerUser?.verifyToken).toBeTruthy();
 
     const verifyResponse = await request(app.getHttpServer())
@@ -105,8 +95,8 @@ describe('Auth verification and invitations (e2e)', () => {
     });
 
     const verifiedUser = Array.from(prismaMock.__stores.users.values()).find(
-      (candidate) => candidate.email === 'owner@verification.test',
-    );
+      (candidate: any) => candidate.email === 'owner@verification.test',
+    ) as any;
 
     expect(verifiedUser).toEqual(
       expect.objectContaining({
@@ -147,9 +137,9 @@ describe('Auth verification and invitations (e2e)', () => {
       ]),
     );
 
-    const invitation = prismaMock.__stores.invitationTokens.find(
-      (candidate) => candidate.email === 'invitee@verification.test',
-    );
+    const invitation = (
+      prismaMock.__stores.invitationTokens as Array<any>
+    ).find((candidate: any) => candidate.email === 'invitee@verification.test');
     expect(invitation).toBeDefined();
 
     const acceptResponse = await request(app.getHttpServer())
@@ -165,9 +155,9 @@ describe('Auth verification and invitations (e2e)', () => {
   });
 
   it('registers an invited user with inviteToken and marks the invitation as used', async () => {
-    const invitation = prismaMock.__stores.invitationTokens.find(
-      (candidate) => candidate.email === 'invitee@verification.test',
-    );
+    const invitation = (
+      prismaMock.__stores.invitationTokens as Array<any>
+    ).find((candidate: any) => candidate.email === 'invitee@verification.test');
 
     const response = await request(app.getHttpServer())
       .post('/api/v1/auth/register')

@@ -45,31 +45,6 @@ enum SegmentType {
   DYNAMIC
   STATIC
   GA4
-  SEMANTIC
-}
-
-enum CampaignStatus {
-  DRAFT
-  SCHEDULED
-  SENDING
-  SENT
-  PAUSED
-  CANCELLED
-}
-
-enum CampaignType {
-  REGULAR
-  AB_TEST
-}
-
-enum EmailEventType {
-  SENT
-  DELIVERED
-  OPENED
-  CLICKED
-  BOUNCED
-  UNSUBSCRIBED
-  COMPLAINED
 }
 
 enum OrderStatus {
@@ -81,11 +56,9 @@ enum OrderStatus {
 }
 
 enum IntegrationType {
-  SHOPIFY
   WOOCOMMERCE
   GOOGLE_ANALYTICS
   GOOGLE_ADS
-  FACEBOOK_ADS
 }
 
 enum IntegrationStatus {
@@ -124,13 +97,10 @@ model Tenant {
   memberships         Membership[]
   insights            Insight[]
   healthScores        CustomerHealthScore[]
-  flows               Flow[]
-  flowExecutions      FlowExecution[]
   integrations        Integration[]
   adCampaigns         AdCampaign[]
   adAudiences         AdAudience[]
   billingSubscription  BillingSubscription?
-  globalSuppressions   GlobalSuppression[]
   invitationTokens     InvitationToken[]
 
   @@map("tenants")
@@ -259,7 +229,6 @@ model Contact {
   emailStatus  EmailStatus              @default(PENDING)
   totalRevenue Decimal                  @default(0) @db.Decimal(12, 2)
   totalOrders  Int                      @default(0)
-  embedding    Unsupported("vector(1536)")?
 
   firstOrderAt   DateTime?
   lastOrderAt    DateTime?
@@ -275,8 +244,6 @@ model Contact {
 
   orders           Order[]
   segmentMembers   SegmentMember[]
-  emailEvents      EmailEvent[]
-  executions       FlowExecution[]
   adAudienceMembers AdAudienceMember[]
 
   @@unique([tenantId, email])
@@ -331,13 +298,6 @@ model OrderItem {
 
   order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
-    productId  String?
-  product    Product? @relation(
-    fields:     [productId],
-    references: [id],
-    onDelete:   SetNull,
-  )
-
 
   @@unique([tenantId, externalId])
   @@index([tenantId])
@@ -361,7 +321,6 @@ model Segment {
   updatedAt DateTime @updatedAt
 
   members     SegmentMember[]
-  campaigns   Campaign[]
   adAudiences AdAudience[]
 
   @@unique([tenantId, name])
@@ -407,81 +366,6 @@ model Product {
   @@index([tenantId, isActive])
   @@index([tenantId, trackStock])
   @@map("products")
-}
-
-model Campaign {
-  id          String         @id @default(cuid())
-  tenantId    String
-  name        String
-  subject     String
-  previewText String?
-  fromName    String
-  fromEmail   String
-  replyTo     String?
-  htmlContent String
-  textContent String?
-  status      CampaignStatus @default(DRAFT)
-  type        CampaignType   @default(REGULAR)
-  scheduledAt DateTime?
-  sentAt      DateTime?
-
-  segmentId String
-  segment   Segment @relation(fields: [segmentId], references: [id], onDelete: Restrict)
-
-  totalSent         Int     @default(0)
-  totalDelivered    Int     @default(0)
-  totalOpened       Int     @default(0)
-  totalClicked      Int     @default(0)
-  totalBounced      Int     @default(0)
-  totalUnsubscribed Int     @default(0)
-  totalComplained   Int     @default(0)
-  revenue           Decimal @default(0) @db.Decimal(12, 2)
-
-  abTests     AbTest[]
-  emailEvents EmailEvent[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([tenantId, status])
-  @@index([tenantId, segmentId])
-  @@index([scheduledAt])
-}
-
-model AbTest {
-  id         String   @id @default(cuid())
-  campaignId String
-  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-
-  variantName  String
-  subject      String
-  htmlContent  String
-  splitPercent Int
-  isWinner     Boolean @default(false)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([campaignId])
-}
-
-model EmailEvent {
-  id         String         @id @default(cuid())
-  tenantId   String
-  campaignId String
-  campaign   Campaign       @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  contactId  String
-  contact    Contact        @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  type       EmailEventType
-  provider   String?
-  providerId String?
-  metadata   Json?
-  createdAt  DateTime       @default(now())
-
-  @@index([tenantId, campaignId])
-  @@index([tenantId, contactId])
-  @@index([type])
-  @@index([createdAt])
 }
 
 enum InsightType {
@@ -541,90 +425,6 @@ model CustomerHealthScore {
   @@index([tenantId])
   @@index([tenantId, segment])
   @@index([calculatedAt])
-}
-
-enum FlowStatus {
-  DRAFT
-  ACTIVE
-  PAUSED
-  ARCHIVED
-}
-
-enum FlowExecutionStatus {
-  RUNNING
-  COMPLETED
-  FAILED
-  CANCELLED
-}
-
-enum StepStatus {
-  PENDING
-  RUNNING
-  COMPLETED
-  FAILED
-  SKIPPED
-}
-
-model Flow {
-  id          String     @id @default(cuid())
-  tenantId    String
-  name        String
-  description String?
-  trigger     Json
-  nodes       Json
-  status      FlowStatus @default(DRAFT)
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-
-  tenant     Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  executions FlowExecution[]
-
-  @@index([tenantId])
-  @@index([tenantId, status])
-}
-
-model FlowExecution {
-  id               String              @id @default(cuid())
-  flowId           String
-  contactId        String
-  tenantId         String
-  triggerRef       String
-  status           FlowExecutionStatus @default(RUNNING)
-  currentStepIndex Int                 @default(0)
-  startedAt        DateTime            @default(now())
-  timeoutAt        DateTime?
-  lastHeartbeat    DateTime?
-  completedAt      DateTime?
-  failedAt         DateTime?
-  error            String?
-  createdAt        DateTime            @default(now())
-  updatedAt        DateTime            @updatedAt
-  flow    Flow                @relation(fields: [flowId], references: [id], onDelete: Cascade)
-  contact Contact             @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  tenant  Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  steps   FlowExecutionStep[]
-  @@unique([flowId, contactId, triggerRef])
-  @@index([tenantId])
-  @@index([flowId])
-  @@index([contactId])
-  @@index([tenantId, status])
-  @@index([status, lastHeartbeat])
-}
-model FlowExecutionStep {
-  id          String     @id @default(cuid())
-  executionId String
-  stepId      String
-  type        String
-  status      StepStatus @default(PENDING)
-  executedAt  DateTime?
-  result      Json?
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-
-  execution FlowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
-
-  @@index([executionId])
-  @@index([stepId])
 }
 
 model AuditLog {
@@ -711,28 +511,6 @@ model AdAudience {
   @@index([segmentId])
 }
 
-enum SuppressionReason {
-  UNSUBSCRIBED
-  BOUNCED
-  COMPLAINED
-  GDPR_REQUEST
-  MANUAL
-}
-
-model GlobalSuppression {
-  id        String            @id @default(cuid())
-  tenantId  String
-  email     String
-  reason    SuppressionReason
-  createdAt DateTime          @default(now())
-
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  @@unique([tenantId, email])
-  @@index([tenantId])
-  @@map("global_suppressions")
-}
-
 model InvitationToken {
   id        String    @id @default(cuid())
   tenantId  String
@@ -761,6 +539,8 @@ model AdAudienceMember {
   @@id([audienceId, contactId])
   @@index([contactId])
 }
+
+
 
 
 

@@ -11,7 +11,6 @@ import type { Queue } from 'bullmq';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
-import { grpcServerOptions } from './grpc/grpc.options';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -21,8 +20,6 @@ async function bootstrap() {
   const logger = new Logger('Bootstrap');
   const nodeEnv = configService.get<string>('app.nodeEnv', 'development');
   const frontendUrl = configService.get<string>('app.frontendUrl', '');
-  const grpcHost = configService.get<string>('grpc.host', '127.0.0.1');
-  const grpcPort = configService.get<number>('grpc.port', 50051);
   const sentryDsn = configService.get<string>('SENTRY_DSN');
 
   if (nodeEnv === 'production' && sentryDsn) {
@@ -99,15 +96,11 @@ async function bootstrap() {
 
   registerBullBoard(app, configService, logger);
 
-  app.connectMicroservice(grpcServerOptions);
-
   const port = configService.get<number>('app.port', 3000);
-  await app.startAllMicroservices();
   await app.listen(port);
 
   logger.log(`API started on http://localhost:${port}/api/v1`);
   logger.log(`Health check on http://localhost:${port}/api/v1/health`);
-  logger.log(`gRPC server started on ${grpcHost}:${grpcPort}`);
 }
 
 function registerBullBoard(
@@ -123,7 +116,7 @@ function registerBullBoard(
   }
 
   try {
-    const queueNames = ['campaign', 'email', 'sync', 'flow'] as const;
+    const queueNames = ['sync'] as const;
     const queues = queueNames
       .map((name) => app.get<Queue>(getQueueToken(name), { strict: false }))
       .filter((queue): queue is Queue => Boolean(queue))

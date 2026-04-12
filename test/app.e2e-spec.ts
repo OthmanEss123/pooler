@@ -18,12 +18,7 @@ interface HealthResponse {
     redis: string;
   };
   queues: {
-    campaign: {
-      waiting: number;
-      active: number;
-      failed: number;
-    };
-    email: {
+    sync: {
       waiting: number;
       active: number;
       failed: number;
@@ -64,8 +59,7 @@ describe('Health (e2e)', () => {
       .overrideProvider(QueueHealthService)
       .useValue({
         getStats: jest.fn().mockResolvedValue({
-          campaign: { waiting: 0, active: 0, failed: 0 },
-          email: { waiting: 0, active: 0, failed: 0 },
+          sync: { waiting: 0, active: 0, failed: 0 },
         }),
       })
       .compile();
@@ -101,8 +95,8 @@ describe('Health (e2e)', () => {
     expect(body.services).toHaveProperty('prisma', 'connected');
     expect(body.services).toHaveProperty('clickhouse', 'connected');
     expect(body.services).toHaveProperty('redis', 'connected');
-    expect(body.queues.campaign.waiting).toBe(0);
-    expect(body.queues.email.waiting).toBe(0);
+    expect(body.queues.sync.waiting).toBe(0);
+    expect(body.queues.sync.failed).toBe(0);
   });
 
   it('GET /api/v1/unknown -> 404', async () => {

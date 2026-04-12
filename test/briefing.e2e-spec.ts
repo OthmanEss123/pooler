@@ -20,7 +20,6 @@ process.env.CLICKHOUSE_URL ??= 'http://default:password@localhost:8123/pilot';
 process.env.JWT_SECRET ??=
   '1234567890123456789012345678901234567890123456789012345678901234';
 process.env.JWT_EXPIRES_IN ??= '15m';
-process.env.NARRATIVE_AGENT_URL = '';
 
 describe('Briefing (e2e)', () => {
   let app: INestApplication<Server>;
@@ -47,7 +46,7 @@ describe('Briefing (e2e)', () => {
   const briefingCache = new Map<string, Record<string, unknown>>();
   let generationCounter = 0;
 
-  const buildBriefing = (tenant: string) => {
+  const buildBriefing = () => {
     generationCounter += 1;
     const generatedAt = new Date(Date.now() + generationCounter).toISOString();
 
@@ -98,7 +97,6 @@ describe('Briefing (e2e)', () => {
         trend: 'up',
         confidence: 0.82,
       },
-      narrative: `Briefing mock pour ${tenant}`,
     };
   };
 
@@ -109,13 +107,13 @@ describe('Briefing (e2e)', () => {
         return cached;
       }
 
-      const briefing = buildBriefing(tenant);
+      const briefing = buildBriefing();
       briefingCache.set(tenant, briefing);
       return briefing;
     }),
     refreshBriefing: jest.fn((tenant: string) => {
       briefingCache.delete(tenant);
-      const briefing = buildBriefing(tenant);
+      const briefing = buildBriefing();
       briefingCache.set(tenant, briefing);
       return briefing;
     }),
@@ -212,7 +210,6 @@ describe('Briefing (e2e)', () => {
     expect(typeof response.body.generatedAt).toBe('string');
     expect(response.body.yesterday.revenue).toBe(1240);
     expect(Array.isArray(response.body.insights)).toBe(true);
-    expect(response.body.narrative).toContain('Briefing mock');
   });
 
   it('reuses the cached payload on the second call', async () => {

@@ -37,6 +37,7 @@ describe('GA4 (e2e)', () => {
             credentials: null,
             lastSyncAt: null,
           }),
+          update: jest.fn().mockResolvedValue(undefined),
         },
         isHealthy: jest.fn().mockResolvedValue(true),
       })
@@ -52,8 +53,7 @@ describe('GA4 (e2e)', () => {
       .overrideProvider(QueueHealthService)
       .useValue({
         getStats: jest.fn().mockResolvedValue({
-          campaign: { waiting: 0, active: 0, failed: 0 },
-          email: { waiting: 0, active: 0, failed: 0 },
+          sync: { waiting: 0, active: 0, failed: 0 },
         }),
       })
       .compile();

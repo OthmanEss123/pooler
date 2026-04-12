@@ -4,11 +4,11 @@ import { ClickhouseModule } from '../../database/clickhouse/clickhouse.module';
 import { PrismaModule } from '../../database/prisma/prisma.module';
 import { RedisModule } from '../../redis/redis.module';
 import { AnalyticsModule } from '../analytics/analytics.module';
-import { InsightsModule } from '../insights/insights.module';
+import { GoogleAdsModule } from '../integrations/google-ads/google-ads.module';
 import { BriefingController } from './briefing.controller';
 import { BriefingService } from './briefing.service';
-import { CampaignAssistService } from './campaign-assist.service';
 import { CopilotController } from './copilot.controller';
+import { CopilotCronService } from './copilot-cron.service';
 import { CopilotService } from './copilot.service';
 import { StockAlertService } from './stock-alert.service';
 
@@ -18,21 +18,16 @@ import { StockAlertService } from './stock-alert.service';
     ClickhouseModule,
     RedisModule,
     forwardRef(() => AnalyticsModule),
-    forwardRef(() => InsightsModule),
+    forwardRef(() => GoogleAdsModule),
   ],
   controllers: [BriefingController, CopilotController],
   providers: [
     CopilotService,
     BriefingService,
     StockAlertService,
-    CampaignAssistService,
+    CopilotCronService,
     RolesGuard,
   ],
-  exports: [
-    CopilotService,
-    BriefingService,
-    StockAlertService,
-    CampaignAssistService,
-  ],
+  exports: [CopilotService, BriefingService, StockAlertService],
 })
 export class CopilotModule {}

@@ -1,4 +1,4 @@
-import {
+﻿import {
   Body,
   Controller,
   Delete,
@@ -24,8 +24,6 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { ContactsImportService } from './contacts-import.service';
 import { ContactsService } from './contacts.service';
-import { EmbeddingsService } from './embeddings.service';
-import { SuppressionsService } from './suppressions.service';
 import { BulkUpsertContactsDto } from './dto/bulk-upsert-contacts.dto';
 import { CreateContactDto } from './dto/create-contact.dto';
 import { QueryContactsDto } from './dto/query-contacts.dto';
@@ -38,8 +36,6 @@ export class ContactsController {
   constructor(
     private readonly contactsService: ContactsService,
     private readonly contactsImportService: ContactsImportService,
-    private readonly suppressionsService: SuppressionsService,
-    private readonly embeddingsService: EmbeddingsService,
   ) {}
 
   @Get('import/template')
@@ -95,36 +91,7 @@ export class ContactsController {
     @CurrentTenant() tenantId: string,
     @Query() query: RecentBuyersQueryDto,
   ) {
-    return this.suppressionsService.getRecentBuyers(tenantId, query.days);
-  }
-
-  @Post('embed')
-  @Roles('OWNER', 'ADMIN')
-  async embedContacts(
-    @CurrentTenant() tenantId: string,
-    @Body() body: { contactId?: string },
-  ) {
-    if (body?.contactId) {
-      return this.embeddingsService.embedContact(tenantId, body.contactId);
-    }
-
-    return this.embeddingsService.embedAllContacts(tenantId);
-  }
-
-  @Get(':id/similar')
-  @Roles('OWNER', 'ADMIN')
-  getSimilarContacts(
-    @CurrentTenant() tenantId: string,
-    @Param('id') id: string,
-    @Query('limit') limit?: string,
-  ) {
-    const parsedLimit = Math.min(Math.max(Number(limit || 10), 1), 50);
-
-    return this.embeddingsService.findSimilarContacts(
-      tenantId,
-      id,
-      parsedLimit,
-    );
+    return this.contactsService.getRecentBuyers(tenantId, query.days);
   }
 
   @Get(':id')
@@ -146,18 +113,6 @@ export class ContactsController {
     @Body() dto: BulkUpsertContactsDto,
   ) {
     return this.contactsService.bulkUpsert(tenantId, dto);
-  }
-
-  @Post('sync-suppression')
-  @Roles('OWNER', 'ADMIN')
-  @HttpCode(HttpStatus.OK)
-  async syncSuppression(@CurrentTenant() tenantId: string) {
-    const [segment, audience] = await Promise.all([
-      this.suppressionsService.syncRecentBuyersSegment(tenantId, 30),
-      this.suppressionsService.syncSuppressionsToAds(tenantId),
-    ]);
-
-    return { segment, audience };
   }
 
   @Patch(':id')

@@ -20,7 +20,6 @@ process.env.JWT_SECRET ??=
 process.env.JWT_EXPIRES_IN ??= '15m';
 process.env.ENCRYPTION_KEY ??=
   '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
-process.env.NARRATIVE_AGENT_URL = '';
 
 interface AuthRegisterResponseBody {
   user: { id: string; tenantId: string };

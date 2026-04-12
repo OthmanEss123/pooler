@@ -8,7 +8,6 @@ import { ConfigService } from '@nestjs/config';
 import {
   BillingPlan,
   BillingSubscriptionStatus,
-  EmailEventType,
   InsightType,
   Prisma,
 } from '@prisma/client';
@@ -20,23 +19,19 @@ const PLAN_LIMITS: Record<
   {
     name: string;
     contactLimit: number;
-    emailQuotaLimit: number;
   }
 > = {
   STARTER: {
     name: 'Starter',
     contactLimit: 1000,
-    emailQuotaLimit: 10000,
   },
   GROWTH: {
     name: 'Growth',
     contactLimit: 10000,
-    emailQuotaLimit: 100000,
   },
   SCALE: {
     name: 'Scale',
     contactLimit: 100000,
-    emailQuotaLimit: 1000000,
   },
 };
 
@@ -96,11 +91,6 @@ type BillingUsage = {
     limit: number;
     percent: number;
   };
-  emailQuota: {
-    used: number;
-    limit: number;
-    percent: number;
-  };
 };
 
 @Injectable()
@@ -123,7 +113,6 @@ export class BillingService {
       name: PLAN_LIMITS[plan].name,
       priceId: this.getPriceId(plan),
       contactLimit: PLAN_LIMITS[plan].contactLimit,
-      emailQuotaLimit: PLAN_LIMITS[plan].emailQuotaLimit,
     }));
   }
 
@@ -351,22 +340,9 @@ export class BillingService {
   async getUsage(tenantId: string): Promise<BillingUsage> {
     const subscription = await this.getOrCreateLocalSubscription(tenantId);
     const planLimits = PLAN_LIMITS[subscription.plan];
-    const monthStart = new Date();
-    monthStart.setDate(1);
-    monthStart.setHours(0, 0, 0, 0);
-
-    const [contactsUsed, emailsUsed] = await Promise.all([
-      this.prisma.contact.count({ where: { tenantId } }),
-      this.prisma.emailEvent.count({
-        where: {
-          tenantId,
-          type: EmailEventType.SENT,
-          createdAt: {
-            gte: monthStart,
-          },
-        },
-      }),
-    ]);
+    const contactsUsed = await this.prisma.contact.count({
+      where: { tenantId },
+    });
 
     return {
       plan: subscription.plan,
@@ -376,11 +352,6 @@ export class BillingService {
         used: contactsUsed,
         limit: planLimits.contactLimit,
         percent: this.computePercent(contactsUsed, planLimits.contactLimit),
-      },
-      emailQuota: {
-        used: emailsUsed,
-        limit: planLimits.emailQuotaLimit,
-        percent: this.computePercent(emailsUsed, planLimits.emailQuotaLimit),
       },
     };
   }

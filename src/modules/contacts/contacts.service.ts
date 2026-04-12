@@ -1,25 +1,22 @@
-import {
+﻿import {
   ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { format } from 'fast-csv';
 import type { Response } from 'express';
-import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma/prisma.service';
+import { QuotaService } from '../billing/quota.service';
 import { BulkUpsertContactsDto } from './dto/bulk-upsert-contacts.dto';
 import { CreateContactDto } from './dto/create-contact.dto';
 import { QueryContactsDto } from './dto/query-contacts.dto';
 import { UpdateContactDto } from './dto/update-contact.dto';
-import { FlowTriggerType } from '../flows/dto/create-flow.dto';
-import { FlowsService } from '../flows/flows.service';
-import { QuotaService } from '../billing/quota.service';
 
 @Injectable()
 export class ContactsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly flowsService: FlowsService,
     private readonly quotaService: QuotaService,
   ) {}
 
@@ -36,7 +33,7 @@ export class ContactsService {
       throw new ConflictException('Contact email already exists');
     }
 
-    const contact = await this.prisma.contact.create({
+    return this.prisma.contact.create({
       data: {
         tenantId,
         email,
@@ -45,14 +42,6 @@ export class ContactsService {
         phone: dto.phone,
       },
     });
-
-    void this.flowsService.triggerFlowsSafe(
-      tenantId,
-      FlowTriggerType.CONTACT_CREATED,
-      contact.id,
-    );
-
-    return contact;
   }
 
   async bulkUpsert(tenantId: string, dto: BulkUpsertContactsDto) {
@@ -175,6 +164,39 @@ export class ContactsService {
       res.on('error', reject);
       csvStream.on('error', reject);
     });
+  }
+
+  async getRecentBuyers(tenantId: string, days: number) {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+
+    const contacts = await this.prisma.contact.findMany({
+      where: {
+        tenantId,
+        orders: {
+          some: {
+            status: { in: ['PAID', 'FULFILLED'] },
+            placedAt: { gte: cutoff },
+          },
+        },
+      },
+      include: {
+        orders: {
+          where: {
+            status: { in: ['PAID', 'FULFILLED'] },
+            placedAt: { gte: cutoff },
+          },
+          orderBy: { placedAt: 'desc' },
+        },
+      },
+    });
+
+    return contacts.map((contact) => ({
+      contactId: contact.id,
+      email: contact.email,
+      lastOrderAt: contact.orders[0]?.placedAt ?? null,
+      totalOrders: contact.orders.length,
+    }));
   }
 
   async findOne(tenantId: string, id: string) {

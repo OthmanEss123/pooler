@@ -14,14 +14,14 @@ const buildService = () => {
     encrypt: jest.fn(),
     decrypt: jest.fn(),
   } as never;
-  const flowsService = { triggerFlowsSafe: jest.fn() } as never;
   const syncQueueService = { syncWoocommerce: jest.fn() } as never;
+  const ordersService = { upsertExternalOrder: jest.fn() } as never;
 
   return new WooCommerceService(
     prisma,
     encryption,
-    flowsService,
     syncQueueService,
+    ordersService,
   );
 };
 

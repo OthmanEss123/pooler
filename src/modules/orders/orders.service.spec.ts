@@ -1,8 +1,6 @@
-import { Test, TestingModule } from '@nestjs/testing';
+﻿import { Test, TestingModule } from '@nestjs/testing';
 import { OrderStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma/prisma.service';
-import { SuppressionsService } from '../contacts/suppressions.service';
-import { FlowsService } from '../flows/flows.service';
 import { ProductsService } from '../products/products.service';
 import { OrdersService } from './orders.service';
 
@@ -35,15 +33,6 @@ type ProductsMock = {
   restoreStock: jest.Mock;
 };
 
-type FlowsMock = {
-  triggerFlowsSafe: jest.Mock;
-};
-
-type SuppressionsMock = {
-  syncRecentBuyersSegment: jest.Mock;
-  syncSuppressionsToAds: jest.Mock;
-};
-
 const mockPrisma: PrismaMock = {
   product: {
     findFirst: jest.fn(),
@@ -73,15 +62,6 @@ const mockProducts: ProductsMock = {
   restoreStock: jest.fn(),
 };
 
-const mockFlows: FlowsMock = {
-  triggerFlowsSafe: jest.fn(),
-};
-
-const mockSuppressions: SuppressionsMock = {
-  syncRecentBuyersSegment: jest.fn(),
-  syncSuppressionsToAds: jest.fn(),
-};
-
 describe('OrdersService', () => {
   let service: OrdersService;
 
@@ -91,8 +71,6 @@ describe('OrdersService', () => {
         OrdersService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: ProductsService, useValue: mockProducts },
-        { provide: FlowsService, useValue: mockFlows },
-        { provide: SuppressionsService, useValue: mockSuppressions },
       ],
     }).compile();
 
@@ -102,8 +80,6 @@ describe('OrdersService', () => {
       (callback: (tx: PrismaMock) => unknown) =>
         Promise.resolve(callback(mockPrisma)),
     );
-    mockSuppressions.syncRecentBuyersSegment.mockResolvedValue(undefined);
-    mockSuppressions.syncSuppressionsToAds.mockResolvedValue(undefined);
   });
 
   describe('create()', () => {

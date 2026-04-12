@@ -7,7 +7,6 @@
   "license": "UNLICENSED",
   "scripts": {
     "prisma:generate": "prisma generate",
-    "grpc:generate:python": "python -m grpc_tools.protoc -I./proto --python_out=./apps/agents/shared/grpc_client --grpc_python_out=./apps/agents/shared/grpc_client ./proto/contacts.proto ./proto/intelligence.proto ./proto/campaigns.proto",
     "postinstall": "prisma generate",
     "prebuild": "prisma generate",
     "build": "nest build",
@@ -28,20 +27,15 @@
     "test:unit": "jest --config ./test/jest-unit.json"
   },
   "dependencies": {
-    "@aws-sdk/client-ses": "^3.1017.0",
-    "@aws-sdk/credential-providers": "^3.1017.0",
     "@bull-board/api": "^6.20.6",
     "@bull-board/express": "^6.20.6",
     "@clickhouse/client": "^1.18.2",
-    "@grpc/grpc-js": "^1.14.3",
-    "@grpc/proto-loader": "^0.7.15",
     "@nestjs/bullmq": "^11.0.4",
     "@nestjs/common": "^11.0.0",
     "@nestjs/config": "^4.0.3",
     "@nestjs/core": "^11.0.0",
     "@nestjs/jwt": "^11.0.2",
     "@nestjs/mapped-types": "^2.1.0",
-    "@nestjs/microservices": "^11.1.17",
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.0.0",
     "@nestjs/schedule": "^6.1.1",

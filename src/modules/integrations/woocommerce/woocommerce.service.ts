@@ -431,7 +431,6 @@ export class WooCommerceService {
           tenantId,
           existingOrder.id,
           OrderStatus.CANCELLED,
-          { emitPostPurchaseEffects: false },
         );
         break;
       }

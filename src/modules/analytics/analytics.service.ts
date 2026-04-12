@@ -1,15 +1,19 @@
-﻿import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma/prisma.service';
 import { ClickhouseService } from '../../database/clickhouse/clickhouse.service';
 import {
   AnalyticsAnomaly,
   AnalyticsSummary,
   BlendedRoasTimeSeriesItem,
-  EmailFunnelMetricItem,
   RevenueTimeSeriesItem,
 } from './types/analytics.types';
 
 type Granularity = 'day' | 'week' | 'month';
+
+type DailyMetricsSnapshot = {
+  sessions: string | number | null;
+  newContacts: string | number | null;
+};
 
 @Injectable()
 export class AnalyticsService {
@@ -29,7 +33,8 @@ export class AnalyticsService {
       SELECT
         sum(revenue) AS totalRevenue,
         sum(orders) AS totalOrders,
-        sum(email_revenue) AS emailRevenue
+        sum(sessions) AS totalSessions,
+        sum(new_contacts) AS newContacts
       FROM metrics_daily
       WHERE tenant_id = {tenantId:String}
         AND date >= toDate({from:String})
@@ -49,32 +54,30 @@ export class AnalyticsService {
       this.clickhouse.query<{
         totalRevenue: string | number | null;
         totalOrders: string | number | null;
-        emailRevenue: string | number | null;
+        totalSessions: string | number | null;
+        newContacts: string | number | null;
       }>(summaryQuery, { tenantId, from, to }),
       this.clickhouse.query<{ adsSpend: string | number | null }>(
         adSpendQuery,
-        {
-          tenantId,
-          from,
-          to,
-        },
+        { tenantId, from, to },
       ),
     ]);
 
     const totalRevenue = Number(summaryRows?.[0]?.totalRevenue ?? 0);
     const totalOrders = Number(summaryRows?.[0]?.totalOrders ?? 0);
-    const emailRevenue = Number(summaryRows?.[0]?.emailRevenue ?? 0);
+    const totalSessions = Number(summaryRows?.[0]?.totalSessions ?? 0);
+    const newContacts = Number(summaryRows?.[0]?.newContacts ?? 0);
     const adsSpend = Number(adSpendRows?.[0]?.adsSpend ?? 0);
 
     const blendedRoas = adsSpend > 0 ? totalRevenue / adsSpend : 0;
     const mer = adsSpend > 0 ? totalRevenue / adsSpend : 0;
-
     const anomalies = await this.detectAnomalies(tenantId, to);
 
     return {
       totalRevenue,
       totalOrders,
-      emailRevenue,
+      totalSessions,
+      newContacts,
       adsSpend,
       blendedRoas: Number(blendedRoas.toFixed(2)),
       mer: Number(mer.toFixed(2)),
@@ -99,7 +102,8 @@ export class AnalyticsService {
       SELECT
         toString(${bucketExpr}) AS period,
         sum(revenue) AS revenue,
-        sum(orders) AS orders
+        sum(orders) AS orders,
+        sum(sessions) AS sessions
       FROM metrics_daily
       WHERE tenant_id = {tenantId:String}
         AND date >= toDate({from:String})
@@ -112,43 +116,14 @@ export class AnalyticsService {
       period: string;
       revenue: string | number;
       orders: string | number;
+      sessions: string | number;
     }>(query, { tenantId, from, to });
 
     return rows.map((row) => ({
       period: row.period,
       revenue: Number(row.revenue ?? 0),
       orders: Number(row.orders ?? 0),
-    }));
-  }
-
-  async getEmailFunnelMetrics(
-    tenantId: string,
-    campaignId?: string,
-  ): Promise<EmailFunnelMetricItem[]> {
-    const hasCampaign = Boolean(campaignId);
-
-    const query = `
-      SELECT
-        type,
-        count() AS count
-      FROM email_events_log
-      WHERE tenant_id = {tenantId:String}
-        ${hasCampaign ? 'AND campaign_id = {campaignId:String}' : ''}
-      GROUP BY type
-      ORDER BY count DESC
-    `;
-
-    const params: Record<string, string> = { tenantId };
-    if (campaignId) params.campaignId = campaignId;
-
-    const rows = await this.clickhouse.query<{
-      type: string;
-      count: string | number;
-    }>(query, params);
-
-    return rows.map((row) => ({
-      type: row.type,
-      count: Number(row.count ?? 0),
+      sessions: Number(row.sessions ?? 0),
     }));
   }
 
@@ -270,31 +245,44 @@ export class AnalyticsService {
     const startDate = new Date(`${date}T00:00:00.000Z`);
     const endDate = new Date(`${date}T23:59:59.999Z`);
 
-    const paidOrders = await this.prisma.order.findMany({
-      where: {
-        contact: { tenantId },
-        status: {
-          in: ['PAID', 'FULFILLED'],
+    const [paidOrders, existingRows] = await Promise.all([
+      this.prisma.order.findMany({
+        where: {
+          contact: { tenantId },
+          status: {
+            in: ['PAID', 'FULFILLED'],
+          },
+          placedAt: {
+            gte: startDate,
+            lte: endDate,
+          },
         },
-        placedAt: {
-          gte: startDate,
-          lte: endDate,
+        select: {
+          id: true,
+          totalAmount: true,
         },
-      },
-      select: {
-        id: true,
-        totalAmount: true,
-      },
-    });
+      }),
+      this.clickhouse.query<DailyMetricsSnapshot>(
+        `
+          SELECT
+            sum(sessions) AS sessions,
+            sum(new_contacts) AS newContacts
+          FROM metrics_daily
+          WHERE tenant_id = {tenantId:String}
+            AND date = toDate({date:String})
+        `,
+        { tenantId, date },
+      ),
+    ]);
 
     const revenue = paidOrders.reduce(
       (sum, order) => sum + Number(order.totalAmount ?? 0),
       0,
     );
-
     const orders = paidOrders.length;
+    const sessions = Number(existingRows?.[0]?.sessions ?? 0);
+    const newContacts = Number(existingRows?.[0]?.newContacts ?? 0);
 
-    // Delete existing row to avoid double-counting with SummingMergeTree
     await this.clickhouse.command(
       `
       ALTER TABLE metrics_daily
@@ -310,43 +298,14 @@ export class AnalyticsService {
         date,
         revenue,
         orders,
-        email_revenue: 0,
+        ads_spend: 0,
+        sessions,
+        new_contacts: newContacts,
       },
     ]);
 
     this.logger.log(
-      `Ingested daily metrics for tenant=${tenantId}, date=${date}, revenue=${revenue}, orders=${orders}`,
-    );
-  }
-
-  async ingestEmailRevenue(tenantId: string, date: string): Promise<void> {
-    const query = `
-      SELECT
-        sum(revenue) AS emailRevenue
-      FROM email_events_log
-      WHERE tenant_id = {tenantId:String}
-        AND type = 'CLICKED'
-        AND event_date = toDate({date:String})
-    `;
-
-    const rows = await this.clickhouse.query<{
-      emailRevenue: string | number | null;
-    }>(query, { tenantId, date });
-
-    const emailRevenue = Number(rows?.[0]?.emailRevenue ?? 0);
-
-    await this.clickhouse.command(
-      `
-      ALTER TABLE metrics_daily
-      UPDATE email_revenue = {emailRevenue:Float64}
-      WHERE tenant_id = {tenantId:String}
-        AND date = toDate({date:String})
-      `,
-      {
-        tenantId,
-        date,
-        emailRevenue,
-      },
+      `Ingested daily metrics for tenant=${tenantId}, date=${date}, revenue=${revenue}, orders=${orders}, sessions=${sessions}`,
     );
   }
 
