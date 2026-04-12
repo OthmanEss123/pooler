@@ -159,6 +159,19 @@ export interface MockInsight {
   isRead: boolean;
   createdAt: Date;
 }
+
+export interface MockWordPressPost {
+  id: string;
+  tenantId: string;
+  externalId: string;
+  title: string;
+  url: string;
+  publishedAt: Date | null;
+  category: string | null;
+  rawPayload: unknown;
+  createdAt: Date;
+  updatedAt: Date;
+}
 type SelectMap = Record<string, boolean | { select: SelectMap }>;
 
 type ComparableValue = number | Date | null;
@@ -397,6 +410,7 @@ export const createPrismaMock = () => {
     createdAt: Date;
     updatedAt: Date;
   }> = [];
+  const wordpressPosts: MockWordPressPost[] = [];
   const adCampaigns: Array<{
     id: string;
     tenantId: string;
@@ -428,6 +442,7 @@ export const createPrismaMock = () => {
   let billingSubscriptionCounter = 1;
   let insightCounter = 1;
   let integrationCounter = 1;
+  let wordPressPostCounter = 1;
   let adCampaignCounter = 1;
 
   const seedContactsForTenant = (tenantId: string) => {
@@ -1455,6 +1470,8 @@ export const createPrismaMock = () => {
             firstName?: string | null;
             lastName?: string | null;
             phone?: string | null;
+            sourceChannel?: string | null;
+            properties?: unknown;
           };
         }) => {
           const now = new Date();
@@ -1466,8 +1483,8 @@ export const createPrismaMock = () => {
             firstName: data.firstName ?? null,
             lastName: data.lastName ?? null,
             phone: data.phone ?? null,
-            sourceChannel: null,
-            properties: null,
+            sourceChannel: data.sourceChannel ?? null,
+            properties: data.properties ?? null,
             emailStatus: EmailStatus.PENDING,
             totalRevenue: 0,
             totalOrders: 0,
@@ -2185,6 +2202,61 @@ export const createPrismaMock = () => {
         },
       ),
     },
+    wordPressPost: {
+      upsert: jest.fn(
+        async ({
+          where,
+          create,
+          update,
+        }: {
+          where: {
+            tenantId_externalId: { tenantId: string; externalId: string };
+          };
+          create: Record<string, unknown>;
+          update: Record<string, unknown>;
+        }) => {
+          const existing = wordpressPosts.find(
+            (candidate) =>
+              candidate.tenantId === where.tenantId_externalId.tenantId &&
+              candidate.externalId === where.tenantId_externalId.externalId,
+          );
+          const now = new Date();
+
+          if (existing) {
+            Object.assign(existing, update, { updatedAt: now });
+            return existing;
+          }
+
+          const row: MockWordPressPost = {
+            id: `wordpress-post-${wordPressPostCounter++}`,
+            tenantId: where.tenantId_externalId.tenantId,
+            externalId: where.tenantId_externalId.externalId,
+            title: typeof create.title === 'string' ? create.title : 'Untitled',
+            url: typeof create.url === 'string' ? create.url : '',
+            publishedAt: (create.publishedAt as Date | null) ?? null,
+            category:
+              typeof create.category === 'string' ? create.category : null,
+            rawPayload: create.rawPayload ?? null,
+            createdAt: now,
+            updatedAt: now,
+          };
+
+          wordpressPosts.push(row);
+          return row;
+        },
+      ),
+      findMany: jest.fn(
+        async ({ where }: { where?: { tenantId?: string } }) => {
+          return wordpressPosts.filter((candidate) => {
+            if (where?.tenantId && candidate.tenantId !== where.tenantId) {
+              return false;
+            }
+
+            return true;
+          });
+        },
+      ),
+    },
     adCampaign: {
       findMany: jest.fn(
         async ({
@@ -2319,7 +2391,12 @@ export const createPrismaMock = () => {
       ),
     },
     __stores: {
+      tenants,
       users,
+      memberships,
+      contacts,
+      integrations,
+      wordpressPosts,
       invitationTokens,
     },
     $transaction: async <T>(

@@ -23,6 +23,7 @@ import { HealthModule } from './modules/health/health.module';
 import { Ga4Module } from './modules/integrations/ga4/ga4.module';
 import { GoogleAdsModule } from './modules/integrations/google-ads/google-ads.module';
 import { WooCommerceModule } from './modules/integrations/woocommerce/woocommerce.module';
+import { WordPressModule } from './modules/integrations/wordpress/wordpress.module';
 import { MembershipsModule } from './modules/memberships/memberships.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
 import { OrdersModule } from './modules/orders/orders.module';
@@ -82,6 +83,7 @@ const nodeEnv = process.env.NODE_ENV ?? 'development';
     Ga4Module,
     GoogleAdsModule,
     WooCommerceModule,
+    WordPressModule,
     ScheduleModule.forRoot(),
   ],
   providers: [

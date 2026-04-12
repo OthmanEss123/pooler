@@ -59,6 +59,7 @@ enum IntegrationType {
   WOOCOMMERCE
   GOOGLE_ANALYTICS
   GOOGLE_ADS
+  WORDPRESS
 }
 
 enum IntegrationStatus {
@@ -98,6 +99,7 @@ model Tenant {
   insights            Insight[]
   healthScores        CustomerHealthScore[]
   integrations        Integration[]
+  wordpressPosts      WordPressPost[]
   adCampaigns         AdCampaign[]
   adAudiences         AdAudience[]
   billingSubscription  BillingSubscription?
@@ -463,6 +465,26 @@ model Integration {
   @@map("integrations")
 }
 
+model WordPressPost {
+  id          String   @id @default(uuid())
+  tenantId    String
+  externalId  String
+  title       String
+  url         String
+  publishedAt DateTime?
+  category    String?
+  rawPayload  Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, externalId])
+  @@index([tenantId])
+  @@index([publishedAt])
+  @@map("wordpress_posts")
+}
+
 model AdCampaign {
   id               String            @id @default(cuid())
   tenantId         String
@@ -539,6 +561,8 @@ model AdAudienceMember {
   @@id([audienceId, contactId])
   @@index([contactId])
 }
+
+
 
 
 

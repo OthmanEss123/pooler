@@ -34,6 +34,7 @@ export const envValidation = Joi.object({
   STRIPE_SCALE_PRICE_ID: Joi.string().required(),
 
   WOOCOMMERCE_WEBHOOK_SECRET: Joi.string().allow('').optional(),
+  WORDPRESS_WEBHOOK_SECRET: Joi.string().allow('').optional(),
 
   GOOGLE_CLIENT_ID: Joi.string().allow('').optional(),
   GOOGLE_CLIENT_SECRET: Joi.string().allow('').optional(),
