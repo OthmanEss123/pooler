@@ -7,7 +7,7 @@
   "license": "UNLICENSED",
   "scripts": {
     "prisma:generate": "prisma generate",
-    "postinstall": "echo 'skipping prisma generate'",
+    "postinstall": "echo skip",
     "prebuild": "prisma generate",
     "build": "prisma generate && nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
