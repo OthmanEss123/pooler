@@ -5,7 +5,11 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ClickHouseClient, createClient } from '@clickhouse/client';
+import {
+  ClickHouseClient,
+  ClickHouseClientConfigOptions,
+  createClient,
+} from '@clickhouse/client';
 
 @Injectable()
 export class ClickhouseService implements OnModuleInit, OnModuleDestroy {
@@ -17,12 +21,7 @@ export class ClickhouseService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit(): Promise<void> {
     try {
-      this.client = createClient({
-        url: this.configService.getOrThrow<string>('CLICKHOUSE_URL'),
-        username: this.configService.get<string>('CLICKHOUSE_USER', 'default'),
-        password: this.configService.get<string>('CLICKHOUSE_PASSWORD', ''),
-        database: this.configService.get<string>('CLICKHOUSE_DB', 'pilot'),
-      });
+      this.client = createClient(this.buildClientConfig());
 
       await this.ensureSchema();
       this.connected = true;
@@ -108,6 +107,38 @@ export class ClickhouseService implements OnModuleInit, OnModuleDestroy {
     } catch {
       return false;
     }
+  }
+
+  private buildClientConfig(): ClickHouseClientConfigOptions {
+    const rawUrl = this.configService.getOrThrow<string>('CLICKHOUSE_URL');
+    const parsedUrl = new URL(rawUrl);
+    const config: ClickHouseClientConfigOptions = {
+      url: parsedUrl,
+      request_timeout: Number(
+        this.configService.get<number>('CLICKHOUSE_REQUEST_TIMEOUT_MS', 5000),
+      ),
+    };
+
+    const username = this.configService.get<string>('CLICKHOUSE_USER');
+    if (username && parsedUrl.username === '') {
+      config.username = username;
+    }
+
+    const password = this.configService.get<string>('CLICKHOUSE_PASSWORD');
+    if (password && parsedUrl.password === '') {
+      config.password = password;
+    }
+
+    const database = this.configService.get<string>('CLICKHOUSE_DB');
+    if (database && !this.urlIncludesDatabase(parsedUrl)) {
+      config.database = database;
+    }
+
+    return config;
+  }
+
+  private urlIncludesDatabase(url: URL): boolean {
+    return url.pathname.trim().length > 1;
   }
 
   private async ensureSchema(): Promise<void> {

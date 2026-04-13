@@ -25,6 +25,7 @@ export default () => ({
     user: process.env.CLICKHOUSE_USER ?? '',
     password: process.env.CLICKHOUSE_PASSWORD ?? '',
     database: process.env.CLICKHOUSE_DB ?? '',
+    requestTimeoutMs: Number(process.env.CLICKHOUSE_REQUEST_TIMEOUT_MS ?? 5000),
   },
 
   encryption: {

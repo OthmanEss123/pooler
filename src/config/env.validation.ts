@@ -14,6 +14,7 @@ export const envValidation = Joi.object({
   CLICKHOUSE_USER: Joi.string().default('default'),
   CLICKHOUSE_PASSWORD: Joi.string().allow('').default(''),
   CLICKHOUSE_DB: Joi.string().default('pilot'),
+  CLICKHOUSE_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1000).default(5000),
 
   JWT_SECRET: Joi.string().min(64).required(),
   JWT_EXPIRES_IN: Joi.string().default('15m'),
