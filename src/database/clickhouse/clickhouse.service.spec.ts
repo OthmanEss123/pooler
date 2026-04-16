@@ -48,6 +48,18 @@ describe('ClickhouseService', () => {
     jest.clearAllMocks();
   });
 
+  it('skips initialization when CLICKHOUSE_URL is missing', async () => {
+    const service = new ClickhouseService(makeConfigService({}));
+
+    await service.onModuleInit();
+
+    expect(createClientMock).not.toHaveBeenCalled();
+    await expect(service.command('SELECT 1')).rejects.toThrow(
+      'Set CLICKHOUSE_URL to enable analytics features.',
+    );
+    await expect(service.isHealthy()).resolves.toBe(false);
+  });
+
   it('uses credentials from CLICKHOUSE_URL without reapplying env overrides', async () => {
     const client = makeClient();
     createClientMock.mockReturnValue(client as never);

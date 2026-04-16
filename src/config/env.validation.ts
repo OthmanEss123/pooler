@@ -10,7 +10,7 @@ export const envValidation = Joi.object({
   DATABASE_URL: Joi.string().required(),
   DIRECT_URL: Joi.string().required(),
 
-  CLICKHOUSE_URL: Joi.string().required(),
+  CLICKHOUSE_URL: Joi.string().allow('').optional(),
   CLICKHOUSE_USER: Joi.string().default('default'),
   CLICKHOUSE_PASSWORD: Joi.string().allow('').default(''),
   CLICKHOUSE_DB: Joi.string().default('pilot'),

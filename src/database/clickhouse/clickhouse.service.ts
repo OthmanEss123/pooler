@@ -20,8 +20,18 @@ export class ClickhouseService implements OnModuleInit, OnModuleDestroy {
   constructor(private readonly configService: ConfigService) {}
 
   async onModuleInit(): Promise<void> {
+    const rawUrl = this.getConfiguredUrl();
+
+    if (!rawUrl) {
+      this.connected = false;
+      this.logger.warn(
+        'CLICKHOUSE_URL is not set. ClickHouse-backed features are disabled.',
+      );
+      return;
+    }
+
     try {
-      this.client = createClient(this.buildClientConfig());
+      this.client = createClient(this.buildClientConfig(rawUrl));
 
       await this.ensureSchema();
       this.connected = true;
@@ -109,8 +119,7 @@ export class ClickhouseService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private buildClientConfig(): ClickHouseClientConfigOptions {
-    const rawUrl = this.configService.getOrThrow<string>('CLICKHOUSE_URL');
+  private buildClientConfig(rawUrl: string): ClickHouseClientConfigOptions {
     const parsedUrl = new URL(rawUrl);
     const config: ClickHouseClientConfigOptions = {
       url: parsedUrl,
@@ -135,6 +144,11 @@ export class ClickhouseService implements OnModuleInit, OnModuleDestroy {
     }
 
     return config;
+  }
+
+  private getConfiguredUrl(): string | null {
+    const rawUrl = this.configService.get<string>('CLICKHOUSE_URL')?.trim();
+    return rawUrl ? rawUrl : null;
   }
 
   private urlIncludesDatabase(url: URL): boolean {
@@ -178,7 +192,9 @@ export class ClickhouseService implements OnModuleInit, OnModuleDestroy {
 
   private getClient(): ClickHouseClient {
     if (!this.client) {
-      throw new Error('ClickHouse client is not initialized');
+      throw new Error(
+        'ClickHouse client is not initialized. Set CLICKHOUSE_URL to enable analytics features.',
+      );
     }
 
     return this.client;
