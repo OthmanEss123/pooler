@@ -138,6 +138,52 @@ describe('AnalyticsController (e2e)', () => {
     expect(clickhouseMock.query).toHaveBeenCalledTimes(4);
   });
 
+  it('GET /api/v1/analytics/summary -> normalizes ISO dates for ClickHouse', async () => {
+    clickhouseMock.query
+      .mockResolvedValueOnce([
+        {
+          totalRevenue: 1200,
+          totalOrders: 15,
+          totalSessions: 640,
+          newContacts: 18,
+        },
+      ])
+      .mockResolvedValueOnce([{ adsSpend: 400 }])
+      .mockResolvedValueOnce([{ currentRevenue: 100 }])
+      .mockResolvedValueOnce([{ avgRevenue7d: 200 }]);
+
+    await request(app.getHttpServer())
+      .get(
+        '/api/v1/analytics/summary?from=2026-03-01T00:00:00.000Z&to=2026-03-10T23:59:59.000Z',
+      )
+      .set('Cookie', cookies)
+      .expect(200);
+
+    expect(clickhouseMock.query).toHaveBeenNthCalledWith(
+      1,
+      expect.any(String),
+      expect.objectContaining({
+        from: '2026-03-01',
+        to: '2026-03-10',
+      }),
+    );
+    expect(clickhouseMock.query).toHaveBeenNthCalledWith(
+      2,
+      expect.any(String),
+      expect.objectContaining({
+        from: '2026-03-01',
+        to: '2026-03-10',
+      }),
+    );
+    expect(clickhouseMock.query).toHaveBeenNthCalledWith(
+      3,
+      expect.any(String),
+      expect.objectContaining({
+        targetDate: '2026-03-10',
+      }),
+    );
+  });
+
   it('GET /api/v1/analytics/revenue -> 200', async () => {
     clickhouseMock.query.mockResolvedValueOnce([
       { period: '2026-03-01', revenue: 100, orders: 2, sessions: 20 },

@@ -29,6 +29,9 @@ export class AnalyticsService {
     from: string,
     to: string,
   ): Promise<AnalyticsSummary> {
+    const normalizedFrom = this.normalizeDateForClickHouse(from);
+    const normalizedTo = this.normalizeDateForClickHouse(to);
+
     const summaryQuery = `
       SELECT
         sum(revenue) AS totalRevenue,
@@ -56,10 +59,18 @@ export class AnalyticsService {
         totalOrders: string | number | null;
         totalSessions: string | number | null;
         newContacts: string | number | null;
-      }>(summaryQuery, { tenantId, from, to }),
+      }>(summaryQuery, {
+        tenantId,
+        from: normalizedFrom,
+        to: normalizedTo,
+      }),
       this.clickhouse.query<{ adsSpend: string | number | null }>(
         adSpendQuery,
-        { tenantId, from, to },
+        {
+          tenantId,
+          from: normalizedFrom,
+          to: normalizedTo,
+        },
       ),
     ]);
 
@@ -71,7 +82,7 @@ export class AnalyticsService {
 
     const blendedRoas = adsSpend > 0 ? totalRevenue / adsSpend : 0;
     const mer = adsSpend > 0 ? totalRevenue / adsSpend : 0;
-    const anomalies = await this.detectAnomalies(tenantId, to);
+    const anomalies = await this.detectAnomalies(tenantId, normalizedTo);
 
     return {
       totalRevenue,
@@ -91,6 +102,9 @@ export class AnalyticsService {
     to: string,
     granularity: Granularity = 'day',
   ): Promise<RevenueTimeSeriesItem[]> {
+    const normalizedFrom = this.normalizeDateForClickHouse(from);
+    const normalizedTo = this.normalizeDateForClickHouse(to);
+
     const bucketExpr =
       granularity === 'month'
         ? `toStartOfMonth(date)`
@@ -117,7 +131,11 @@ export class AnalyticsService {
       revenue: string | number;
       orders: string | number;
       sessions: string | number;
-    }>(query, { tenantId, from, to });
+    }>(query, {
+      tenantId,
+      from: normalizedFrom,
+      to: normalizedTo,
+    });
 
     return rows.map((row) => ({
       period: row.period,
@@ -132,6 +150,9 @@ export class AnalyticsService {
     from: string,
     to: string,
   ): Promise<BlendedRoasTimeSeriesItem[]> {
+    const normalizedFrom = this.normalizeDateForClickHouse(from);
+    const normalizedTo = this.normalizeDateForClickHouse(to);
+
     const query = `
       SELECT
         toString(m.date) AS date,
@@ -162,7 +183,11 @@ export class AnalyticsService {
       date: string;
       revenue: string | number | null;
       spend: string | number | null;
-    }>(query, { tenantId, from, to });
+    }>(query, {
+      tenantId,
+      from: normalizedFrom,
+      to: normalizedTo,
+    });
 
     return rows.map((row) => {
       const revenue = Number(row.revenue ?? 0);
@@ -329,5 +354,15 @@ export class AnalyticsService {
         conversions: params.conversions,
       },
     ]);
+  }
+
+  private normalizeDateForClickHouse(value: string): string {
+    const dateOnlyMatch = value.match(/^\d{4}-\d{2}-\d{2}/);
+
+    if (dateOnlyMatch) {
+      return dateOnlyMatch[0];
+    }
+
+    return value;
   }
 }
