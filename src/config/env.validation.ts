@@ -45,6 +45,8 @@ export const envValidation = Joi.object({
   GOOGLE_ADS_API_VERSION: Joi.string().default('v22'),
 
   ANTHROPIC_API_KEY: Joi.string().allow('').optional(),
+  GROQ_API_KEY: Joi.string().allow('').optional(),
+  GROQ_MODEL: Joi.string().default('llama3-70b-8192'),
 });
 
 export const envValidationSchema = envValidation;

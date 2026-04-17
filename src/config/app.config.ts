@@ -46,5 +46,7 @@ export default () => ({
 
   agents: {
     anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? '',
+    groqApiKey: process.env.GROQ_API_KEY ?? '',
+    groqModel: process.env.GROQ_MODEL ?? 'llama3-70b-8192',
   },
 });
