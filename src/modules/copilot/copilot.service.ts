@@ -27,9 +27,6 @@ type GroqResponse = {
 @Injectable()
 export class CopilotService {
   private readonly logger = new Logger(CopilotService.name);
-  private readonly groqApiKey = process.env.GROQ_API_KEY ?? '';
-  private readonly groqModel = process.env.GROQ_MODEL ?? 'llama3-70b-8192';
-  private readonly groqUrl = 'https://api.groq.com/openai/v1/chat/completions';
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -78,63 +75,62 @@ export class CopilotService {
       return this.buildFallbackAnswer(question);
     }
 
-    if (!this.groqApiKey) {
+    void tenantId;
+    void context;
+
+    console.log('GROQ_API_KEY exists =', !!process.env.GROQ_API_KEY);
+    console.log('GROQ_MODEL =', process.env.GROQ_MODEL);
+
+    if (!process.env.GROQ_API_KEY) {
       this.logger.error('GROQ_API_KEY is missing for Copilot requests.');
       return this.buildFallbackAnswer(question);
     }
 
     try {
-      const response = await fetch(this.groqUrl, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${this.groqApiKey}`,
-          'Content-Type': 'application/json',
+      const response = await fetch(
+        'https://api.groq.com/openai/v1/chat/completions',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: process.env.GROQ_MODEL || 'llama-3.1-70b-versatile',
+            messages: [
+              {
+                role: 'system',
+                content: 'Tu es un assistant expert business.',
+              },
+              {
+                role: 'user',
+                content: question,
+              },
+            ],
+          }),
+          signal: AbortSignal.timeout(10000),
         },
-        body: JSON.stringify({
-          model: this.groqModel,
-          temperature: 0.3,
-          max_tokens: 700,
-          messages: [
-            {
-              role: 'system',
-              content:
-                'Tu es le copilot commerce de Pilot. Reponds uniquement en JSON valide avec les cles answer, reasoning et actions. answer doit etre une chaine courte et utile en francais. reasoning doit etre une courte explication. actions doit etre un tableau de 0 a 3 actions concretes.',
-            },
-            {
-              role: 'user',
-              content: this.buildPrompt(tenantId, question, context),
-            },
-          ],
-        }),
-        signal: AbortSignal.timeout(10000),
-      });
+      );
 
-      const rawBody = (await response.text()).trim();
-      const data = this.parseGroqResponse(rawBody);
+      console.log('Groq status =', response.status);
+      const raw = await response.text();
+      console.log('Groq raw =', raw);
 
       if (!response.ok) {
-        this.logger.error(
-          `Groq request failed with status ${response.status}: ${rawBody || 'empty body'}`,
-        );
-        throw new Error(
-          data?.error?.message ?? `Groq request failed with status ${response.status}`,
-        );
+        throw new Error(`Groq returned ${response.status}: ${raw}`);
       }
 
+      const data = JSON.parse(raw) as GroqResponse;
       const content = this.extractGroqContent(data);
       const parsed = this.parseAskResponse(content);
 
       return {
-        answer:
-          parsed.answer ??
-          this.fallbackAnswerText(question),
+        answer: parsed.answer ?? this.fallbackAnswerText(question),
         reasoning: parsed.reasoning ?? '',
         actions: parsed.actions ?? [],
       };
     } catch (error) {
-      this.logger.error(
-        `Copilot Groq request failed for tenant ${tenantId}: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      console.error('COPILOT ERROR =', error);
       return this.buildFallbackAnswer(question);
     }
   }
@@ -161,19 +157,6 @@ export class CopilotService {
       return JSON.stringify(context, null, 2);
     } catch {
       return '[unserializable context]';
-    }
-  }
-
-  private parseGroqResponse(rawBody: string) {
-    if (!rawBody) {
-      return null;
-    }
-
-    try {
-      return JSON.parse(rawBody) as GroqResponse;
-    } catch {
-      this.logger.warn('Groq returned a non-JSON response body.');
-      return null;
     }
   }
 
@@ -211,7 +194,8 @@ export class CopilotService {
     try {
       const parsed = JSON.parse(jsonCandidate) as AskResponse;
       return {
-        answer: typeof parsed.answer === 'string' ? parsed.answer.trim() : undefined,
+        answer:
+          typeof parsed.answer === 'string' ? parsed.answer.trim() : undefined,
         reasoning:
           typeof parsed.reasoning === 'string' ? parsed.reasoning.trim() : '',
         actions: Array.isArray(parsed.actions)
