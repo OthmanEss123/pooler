@@ -293,10 +293,9 @@ export class CopilotService {
     };
   }
 
-  private fallbackAnswerText(question: string) {
-    return `Service temporairement indisponible. Question recue: ${question}`;
-  }
-
+private fallbackAnswerText(question: string) {
+  return `OPENROUTER_DEBUG_BUILD_ACTIVE - Question recue: ${question}`;
+}
   private mapAction(type: InsightType) {
     switch (type) {
       case InsightType.AD_WASTE:
