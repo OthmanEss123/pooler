@@ -55,7 +55,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS "OrderItem_tenantId_externalId_key"
 CREATE INDEX IF NOT EXISTS "OrderItem_tenantId_idx"
   ON "OrderItem"("tenantId");
 
-ALTER TABLE "Product"
+ALTER TABLE "products"
   ADD COLUMN IF NOT EXISTS "rawPayload" JSONB;
 
 CREATE INDEX IF NOT EXISTS "Contact_embedding_idx"

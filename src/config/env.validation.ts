@@ -47,6 +47,8 @@ export const envValidation = Joi.object({
   ANTHROPIC_API_KEY: Joi.string().allow('').optional(),
   GROQ_API_KEY: Joi.string().allow('').optional(),
   GROQ_MODEL: Joi.string().default('llama3-70b-8192'),
+  OPENROUTER_API_KEY: Joi.string().allow('').optional(),
+  OPENROUTER_MODEL: Joi.string().default('openrouter/auto'),
 });
 
 export const envValidationSchema = envValidation;

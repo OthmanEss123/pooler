@@ -78,49 +78,8 @@ export class CopilotService {
     void tenantId;
     void context;
 
-    console.log('GROQ_API_KEY exists =', !!process.env.GROQ_API_KEY);
-    console.log('GROQ_MODEL =', process.env.GROQ_MODEL);
-
-    if (!process.env.GROQ_API_KEY) {
-      this.logger.error('GROQ_API_KEY is missing for Copilot requests.');
-      return this.buildFallbackAnswer(question);
-    }
-
     try {
-      const response = await fetch(
-        'https://api.groq.com/openai/v1/chat/completions',
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: process.env.GROQ_MODEL || 'llama-3.1-70b-versatile',
-            messages: [
-              {
-                role: 'system',
-                content: 'Tu es un assistant expert business.',
-              },
-              {
-                role: 'user',
-                content: question,
-              },
-            ],
-          }),
-          signal: AbortSignal.timeout(10000),
-        },
-      );
-
-      console.log('Groq status =', response.status);
-      const raw = await response.text();
-      console.log('Groq raw =', raw);
-
-      if (!response.ok) {
-        throw new Error(`Groq returned ${response.status}: ${raw}`);
-      }
-
-      const data = JSON.parse(raw) as GroqResponse;
+      const data = await this.requestCopilotAnswer(question);
       const content = this.extractGroqContent(data);
       const parsed = this.parseAskResponse(content);
 
@@ -130,9 +89,88 @@ export class CopilotService {
         actions: parsed.actions ?? [],
       };
     } catch (error) {
-      console.error('COPILOT ERROR =', error);
+      this.logger.error(
+        `Copilot provider request failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
       return this.buildFallbackAnswer(question);
     }
+  }
+
+  private async requestCopilotAnswer(question: string) {
+    const messages = [
+      {
+        role: 'system',
+        content: 'Tu es un assistant expert business.',
+      },
+      {
+        role: 'user',
+        content: question,
+      },
+    ];
+
+    if (process.env.GROQ_API_KEY) {
+      this.logger.log('Copilot provider selected: Groq');
+      return this.fetchChatCompletion({
+        providerName: 'Groq',
+        url: 'https://api.groq.com/openai/v1/chat/completions',
+        apiKey: process.env.GROQ_API_KEY,
+        model: process.env.GROQ_MODEL || 'llama-3.1-70b-versatile',
+        headers: {},
+        messages,
+      });
+    }
+
+    if (process.env.OPENROUTER_API_KEY) {
+      this.logger.log('Copilot provider selected: OpenRouter');
+      return this.fetchChatCompletion({
+        providerName: 'OpenRouter',
+        url: 'https://openrouter.ai/api/v1/chat/completions',
+        apiKey: process.env.OPENROUTER_API_KEY,
+        model: process.env.OPENROUTER_MODEL || 'openrouter/auto',
+        headers: {
+          'HTTP-Referer': process.env.FRONTEND_URL || 'http://localhost:3001',
+          'X-Title': 'Pilot Platform Backend',
+        },
+        messages,
+      });
+    }
+
+    throw new Error(
+      'No Copilot provider configured. Set GROQ_API_KEY or OPENROUTER_API_KEY.',
+    );
+  }
+
+  private async fetchChatCompletion(params: {
+    providerName: string;
+    url: string;
+    apiKey: string;
+    model: string;
+    headers: Record<string, string>;
+    messages: Array<{ role: string; content: string }>;
+  }) {
+    const response = await fetch(params.url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${params.apiKey}`,
+        'Content-Type': 'application/json',
+        ...params.headers,
+      },
+      body: JSON.stringify({
+        model: params.model,
+        messages: params.messages,
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+
+    const raw = await response.text();
+
+    if (!response.ok) {
+      throw new Error(
+        `${params.providerName} returned ${response.status}: ${raw}`,
+      );
+    }
+
+    return JSON.parse(raw) as GroqResponse;
   }
 
   private buildPrompt(
