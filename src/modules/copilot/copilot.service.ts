@@ -109,7 +109,9 @@ export class CopilotService {
     ];
 
     if (process.env.OPENROUTER_API_KEY) {
-      this.logger.log('Copilot provider selected: OpenRouter');
+      this.logger.log(
+        `Copilot provider selected: OpenRouter (model=${process.env.OPENROUTER_MODEL || 'openrouter/auto'})`,
+      );
       return this.fetchChatCompletion({
         providerName: 'OpenRouter',
         url: 'https://openrouter.ai/api/v1/chat/completions',
@@ -152,11 +154,22 @@ export class CopilotService {
 
     const raw = await response.text();
 
+    this.logger.log(
+      `${params.providerName} response status=${response.status} model=${params.model}`,
+    );
+
     if (!response.ok) {
+      this.logger.error(
+        `${params.providerName} error payload: ${raw.slice(0, 1000)}`,
+      );
       throw new Error(
         `${params.providerName} returned ${response.status}: ${raw}`,
       );
     }
+
+    this.logger.log(
+      `${params.providerName} success payload preview: ${raw.slice(0, 300)}`,
+    );
 
     return JSON.parse(raw) as ProviderResponse;
   }
