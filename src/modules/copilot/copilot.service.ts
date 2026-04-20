@@ -8,15 +8,15 @@ type AskResponse = {
   actions?: string[];
 };
 
-type GroqMessageContentPart = {
+type ProviderMessageContentPart = {
   type?: string;
   text?: string;
 };
 
-type GroqResponse = {
+type ProviderResponse = {
   choices?: Array<{
     message?: {
-      content?: string | GroqMessageContentPart[];
+      content?: string | ProviderMessageContentPart[];
     };
   }>;
   error?: {
@@ -80,7 +80,7 @@ export class CopilotService {
 
     try {
       const data = await this.requestCopilotAnswer(question);
-      const content = this.extractGroqContent(data);
+      const content = this.extractProviderContent(data);
       const parsed = this.parseAskResponse(content);
 
       return {
@@ -108,18 +108,6 @@ export class CopilotService {
       },
     ];
 
-    if (process.env.GROQ_API_KEY) {
-      this.logger.log('Copilot provider selected: Groq');
-      return this.fetchChatCompletion({
-        providerName: 'Groq',
-        url: 'https://api.groq.com/openai/v1/chat/completions',
-        apiKey: process.env.GROQ_API_KEY,
-        model: process.env.GROQ_MODEL || 'llama-3.1-70b-versatile',
-        headers: {},
-        messages,
-      });
-    }
-
     if (process.env.OPENROUTER_API_KEY) {
       this.logger.log('Copilot provider selected: OpenRouter');
       return this.fetchChatCompletion({
@@ -136,7 +124,7 @@ export class CopilotService {
     }
 
     throw new Error(
-      'No Copilot provider configured. Set GROQ_API_KEY or OPENROUTER_API_KEY.',
+      'No Copilot provider configured. Set OPENROUTER_API_KEY.',
     );
   }
 
@@ -170,7 +158,7 @@ export class CopilotService {
       );
     }
 
-    return JSON.parse(raw) as GroqResponse;
+    return JSON.parse(raw) as ProviderResponse;
   }
 
   private buildPrompt(
@@ -198,7 +186,7 @@ export class CopilotService {
     }
   }
 
-  private extractGroqContent(data: GroqResponse | null) {
+  private extractProviderContent(data: ProviderResponse | null) {
     const content = data?.choices?.[0]?.message?.content;
 
     if (typeof content === 'string') {
