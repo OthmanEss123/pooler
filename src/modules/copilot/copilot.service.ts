@@ -89,10 +89,13 @@ export class CopilotService {
         actions: parsed.actions ?? [],
       };
     } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       this.logger.error(
-        `Copilot provider request failed: ${error instanceof Error ? error.message : String(error)}`,
+        `Copilot provider request failed: ${errorMessage}`,
       );
-      return this.buildFallbackAnswer(question);
+      console.error('COPILOT_PROVIDER_ERROR', errorMessage);
+      return this.buildFallbackAnswer(question, errorMessage);
     }
   }
 
@@ -111,6 +114,11 @@ export class CopilotService {
     if (process.env.OPENROUTER_API_KEY) {
       this.logger.log(
         `Copilot provider selected: OpenRouter (model=${process.env.OPENROUTER_MODEL || 'openrouter/auto'})`,
+      );
+      console.log(
+        'COPILOT_PROVIDER_SELECTED',
+        'OpenRouter',
+        process.env.OPENROUTER_MODEL || 'openrouter/auto',
       );
       return this.fetchChatCompletion({
         providerName: 'OpenRouter',
@@ -157,10 +165,21 @@ export class CopilotService {
     this.logger.log(
       `${params.providerName} response status=${response.status} model=${params.model}`,
     );
+    console.log(
+      'COPILOT_PROVIDER_STATUS',
+      params.providerName,
+      response.status,
+      params.model,
+    );
 
     if (!response.ok) {
       this.logger.error(
         `${params.providerName} error payload: ${raw.slice(0, 1000)}`,
+      );
+      console.error(
+        'COPILOT_PROVIDER_PAYLOAD',
+        params.providerName,
+        raw.slice(0, 1000),
       );
       throw new Error(
         `${params.providerName} returned ${response.status}: ${raw}`,
@@ -266,10 +285,10 @@ export class CopilotService {
     return candidate.slice(start, end + 1);
   }
 
-  private buildFallbackAnswer(question: string) {
+  private buildFallbackAnswer(question: string, reason = '') {
     return {
       answer: this.fallbackAnswerText(question),
-      reasoning: '',
+      reasoning: reason,
       actions: [],
     };
   }
