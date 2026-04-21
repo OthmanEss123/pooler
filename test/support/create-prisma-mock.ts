@@ -2245,17 +2245,98 @@ export const createPrismaMock = () => {
           return row;
         },
       ),
+      findFirst: jest.fn(
+        async ({
+          where,
+        }: {
+          where?: { tenantId?: string; id?: string };
+        }) => {
+          return (
+            wordpressPosts.find((candidate) => {
+              if (where?.tenantId && candidate.tenantId !== where.tenantId) {
+                return false;
+              }
+
+              if (where?.id && candidate.id !== where.id) {
+                return false;
+              }
+
+              return true;
+            }) ?? null
+          );
+        },
+      ),
       findMany: jest.fn(
-        async ({ where }: { where?: { tenantId?: string } }) => {
-          return wordpressPosts.filter((candidate) => {
+        async ({
+          where,
+          take,
+          skip,
+          orderBy,
+        }: {
+          where?: { tenantId?: string };
+          take?: number;
+          skip?: number;
+          orderBy?:
+            | { createdAt?: 'asc' | 'desc'; publishedAt?: 'asc' | 'desc' }
+            | Array<{
+                createdAt?: 'asc' | 'desc';
+                publishedAt?: 'asc' | 'desc';
+              }>;
+        }) => {
+          const filtered = wordpressPosts.filter((candidate) => {
             if (where?.tenantId && candidate.tenantId !== where.tenantId) {
               return false;
             }
 
             return true;
           });
+
+          const orderEntries = Array.isArray(orderBy)
+            ? orderBy
+            : orderBy
+              ? [orderBy]
+              : [];
+
+          filtered.sort((left, right) => {
+            for (const clause of orderEntries) {
+              if (clause.publishedAt) {
+                const leftValue = left.publishedAt?.getTime() ?? 0;
+                const rightValue = right.publishedAt?.getTime() ?? 0;
+
+                if (leftValue !== rightValue) {
+                  return clause.publishedAt === 'desc'
+                    ? rightValue - leftValue
+                    : leftValue - rightValue;
+                }
+              }
+
+              if (clause.createdAt) {
+                const leftValue = left.createdAt.getTime();
+                const rightValue = right.createdAt.getTime();
+
+                if (leftValue !== rightValue) {
+                  return clause.createdAt === 'desc'
+                    ? rightValue - leftValue
+                    : leftValue - rightValue;
+                }
+              }
+            }
+
+            return 0;
+          });
+
+          return filtered.slice(skip ?? 0, (skip ?? 0) + (take ?? filtered.length));
         },
       ),
+      count: jest.fn(async ({ where }: { where?: { tenantId?: string } }) => {
+        return wordpressPosts.filter((candidate) => {
+          if (where?.tenantId && candidate.tenantId !== where.tenantId) {
+            return false;
+          }
+
+          return true;
+        }).length;
+      }),
     },
     adCampaign: {
       findMany: jest.fn(

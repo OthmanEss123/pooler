@@ -83,8 +83,12 @@ describe('WordPress (e2e)', () => {
         return Promise.resolve([
           {
             id: 501,
+            slug: 'pilot-launches-wordpress-sync',
             title: {
               rendered: 'Pilot launches WordPress sync',
+            },
+            content: {
+              rendered: '<p>WordPress content body</p>',
             },
             link: 'https://example.com/pilot-wordpress-sync',
             date: '2026-04-10T09:00:00.000Z',
@@ -323,18 +327,36 @@ describe('WordPress (e2e)', () => {
       .set('Cookie', cookies)
       .expect(200);
 
-    expect(response.body).toEqual(
+    expect(response.body.total).toBeGreaterThan(0);
+    expect(response.body.limit).toBe(10);
+    expect(response.body.offset).toBe(0);
+    expect(response.body.data).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           externalId: '501',
           title: 'Pilot launches WordPress sync',
+          slug: 'pilot-launches-wordpress-sync',
+          url: 'https://example.com/pilot-wordpress-sync',
+          contentHtml: '<p>WordPress content body</p>',
         }),
       ]),
     );
+    expect(response.body.data[0].rawPayload).toBeUndefined();
   });
 
   it('GET /posts -> 401 sans auth', async () => {
     await request(app.getHttpServer()).get('/api/v1/posts').expect(401);
+  });
+
+  it('GET /posts -> 200 avec pagination', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/posts?limit=1&offset=0')
+      .set('Cookie', cookies)
+      .expect(200);
+
+    expect(response.body.limit).toBe(1);
+    expect(response.body.offset).toBe(0);
+    expect(response.body.data).toHaveLength(1);
   });
 
   it('GET /posts/:id -> 200 et retourne le detail du post', async () => {
@@ -351,7 +373,10 @@ describe('WordPress (e2e)', () => {
       id: existingPost!.id,
       externalId: '501',
       title: 'Pilot launches WordPress sync',
+      slug: 'pilot-launches-wordpress-sync',
+      contentHtml: '<p>WordPress content body</p>',
     });
+    expect(response.body.rawPayload).toBeUndefined();
   });
 
   it('GET /posts/:id -> 404 si introuvable', async () => {
