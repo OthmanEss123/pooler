@@ -464,6 +464,8 @@ export class WordPressService {
       id: this.readScalar(payload.id ?? payload.ID),
       email: this.readString(payload.email),
       name: this.readString(payload.name ?? payload.display_name),
+      slug: this.readString(payload.slug ?? payload.user_nicename),
+      username: this.readString(payload.username ?? payload.user_login),
       roles: Array.isArray(payload.roles)
         ? payload.roles.filter(
             (role): role is string => typeof role === 'string',

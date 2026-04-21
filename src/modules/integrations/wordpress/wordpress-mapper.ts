@@ -30,9 +30,13 @@ export class WordPressMapper {
       .split(/\s+/)
       .map((part) => part.trim())
       .filter((part) => part.length > 0);
+    const fallbackEmail = this.buildFallbackEmail(wpUser);
 
     return {
-      email: typeof wpUser.email === 'string' ? wpUser.email : null,
+      email:
+        typeof wpUser.email === 'string' && wpUser.email.trim().length > 0
+          ? wpUser.email
+          : fallbackEmail,
       firstName: nameParts[0] ?? null,
       lastName: nameParts.length > 1 ? nameParts.slice(1).join(' ') : null,
       sourceChannel: 'wordpress',
@@ -44,6 +48,27 @@ export class WordPressMapper {
         wpRoles: Array.isArray(wpUser.roles) ? wpUser.roles : [],
       },
     };
+  }
+
+  private buildFallbackEmail(wpUser: WordPressUser): string | null {
+    const candidate = [wpUser.slug, wpUser.username, wpUser.name]
+      .find((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      ?.trim()
+      .toLowerCase();
+
+    const localPart = candidate
+      ?.replace(/[^a-z0-9._-]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+
+    if (localPart && localPart.length > 0) {
+      return `${localPart}@wordpress.local`;
+    }
+
+    if (wpUser.id !== undefined && wpUser.id !== null) {
+      return `wp-user-${String(wpUser.id).toLowerCase()}@wordpress.local`;
+    }
+
+    return null;
   }
 
   mapPost(wpPost: WordPressPostPayload): MappedWordPressPost {

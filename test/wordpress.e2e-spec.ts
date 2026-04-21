@@ -262,6 +262,43 @@ describe('WordPress (e2e)', () => {
     });
   });
 
+  it('POST /integrations/wordpress/sync/users -> 200 avec email fallback si WordPress le masque', async () => {
+    wordPressApiClientMock.getUsers.mockImplementationOnce(
+      (_siteUrl: string, _credentials: unknown, page: number) => {
+        if (page !== 1) {
+          return Promise.resolve([]);
+        }
+
+        return Promise.resolve([
+          {
+            id: 202,
+            slug: 'client1',
+            name: 'Client One',
+            roles: ['subscriber'],
+          },
+        ]);
+      },
+    );
+
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/integrations/wordpress/sync/users')
+      .set('Cookie', cookies)
+      .expect(200);
+
+    expect(response.body.synced).toBe(1);
+
+    const syncedContact = contactStore.find(
+      (contact) => contact.email === 'client1@wordpress.local',
+    );
+
+    expect(syncedContact).toMatchObject({
+      email: 'client1@wordpress.local',
+      firstName: 'Client',
+      lastName: 'One',
+      sourceChannel: 'wordpress',
+    });
+  });
+
   it('POST /integrations/wordpress/sync/posts -> 200', async () => {
     const response = await request(app.getHttpServer())
       .post('/api/v1/integrations/wordpress/sync/posts')

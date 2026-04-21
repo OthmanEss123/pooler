@@ -9,6 +9,8 @@ export interface WordPressUser {
   id?: number | string;
   email?: string;
   name?: string;
+  slug?: string;
+  username?: string;
   roles?: string[];
 }
 
