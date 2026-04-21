@@ -316,6 +316,26 @@ describe('WordPress (e2e)', () => {
     );
   });
 
+  it('GET /posts -> 200 et retourne les posts WordPress du tenant', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/posts')
+      .set('Cookie', cookies)
+      .expect(200);
+
+    expect(response.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          externalId: '501',
+          title: 'Pilot launches WordPress sync',
+        }),
+      ]),
+    );
+  });
+
+  it('GET /posts -> 401 sans auth', async () => {
+    await request(app.getHttpServer()).get('/api/v1/posts').expect(401);
+  });
+
   it('POST /integrations/wordpress/disconnect -> 200 puis status DISCONNECTED', async () => {
     const disconnectResponse = await request(app.getHttpServer())
       .post('/api/v1/integrations/wordpress/disconnect')

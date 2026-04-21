@@ -27,6 +27,7 @@ import { WordPressModule } from './modules/integrations/wordpress/wordpress.modu
 import { MembershipsModule } from './modules/memberships/memberships.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
 import { OrdersModule } from './modules/orders/orders.module';
+import { PostsModule } from './modules/posts/posts.module';
 import { ProductsModule } from './modules/products/products.module';
 import { TenantsModule } from './modules/tenants/tenants.module';
 import { QueueModule } from './queue/queue.module';
@@ -76,6 +77,7 @@ const nodeEnv = process.env.NODE_ENV ?? 'development';
     ContactsModule,
     CopilotModule,
     OrdersModule,
+    PostsModule,
     ProductsModule,
     QueueModule,
     AnalyticsModule,
