@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, UseGuards } from '@nestjs/common';
 import { CurrentTenant } from '../../common/decorators/current-tenant.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { PostsService } from './posts.service';
@@ -11,5 +11,10 @@ export class PostsController {
   @Get()
   findAll(@CurrentTenant() tenantId: string) {
     return this.postsService.findAll(tenantId);
+  }
+
+  @Get(':id')
+  findOne(@CurrentTenant() tenantId: string, @Param('id') id: string) {
+    return this.postsService.findOne(tenantId, id);
   }
 }

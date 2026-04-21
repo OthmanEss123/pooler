@@ -38,6 +38,7 @@ type ContactStoreRow = {
 };
 
 type WordPressPostStoreRow = {
+  id: string;
   externalId: string;
   title: string;
 };
@@ -334,6 +335,30 @@ describe('WordPress (e2e)', () => {
 
   it('GET /posts -> 401 sans auth', async () => {
     await request(app.getHttpServer()).get('/api/v1/posts').expect(401);
+  });
+
+  it('GET /posts/:id -> 200 et retourne le detail du post', async () => {
+    const existingPost = wordPressPostStore.find(
+      (post) => post.externalId === '501',
+    );
+
+    const response = await request(app.getHttpServer())
+      .get(`/api/v1/posts/${existingPost!.id}`)
+      .set('Cookie', cookies)
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      id: existingPost!.id,
+      externalId: '501',
+      title: 'Pilot launches WordPress sync',
+    });
+  });
+
+  it('GET /posts/:id -> 404 si introuvable', async () => {
+    await request(app.getHttpServer())
+      .get('/api/v1/posts/post-inconnu')
+      .set('Cookie', cookies)
+      .expect(404);
   });
 
   it('POST /integrations/wordpress/disconnect -> 200 puis status DISCONNECTED', async () => {
