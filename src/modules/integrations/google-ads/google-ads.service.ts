@@ -210,17 +210,33 @@ export class GoogleAdsService {
     }
 
     const normalizedCustomerId = this.normalizeCustomerId(customerId);
-    const integration = await this.prisma.integration.findUnique({
+    const integration = await this.prisma.integration.findFirst({
       where: {
-        tenantId_type: {
-          tenantId,
-          type: IntegrationType.GOOGLE_ADS,
-        },
+        tenantId,
+        type: IntegrationType.GOOGLE_ADS,
       },
     });
 
     if (!integration) {
-      throw new NotFoundException('Integration Google Ads introuvable');
+      const createdIntegration = await this.prisma.integration.create({
+        data: {
+          tenantId,
+          type: IntegrationType.GOOGLE_ADS,
+          status: IntegrationStatus.ACTIVE,
+          metadata: {
+            provider: 'google-ads',
+            customerId: normalizedCustomerId,
+            connectedAt: new Date().toISOString(),
+          } as Prisma.JsonObject,
+        },
+      });
+
+      return {
+        success: true,
+        integrationId: createdIntegration.id,
+        customerId: normalizedCustomerId,
+        status: createdIntegration.status,
+      };
     }
 
     const existingMetadata =
