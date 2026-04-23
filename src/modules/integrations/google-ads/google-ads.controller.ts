@@ -17,6 +17,7 @@ import { Roles } from '../../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../../common/guards/roles.guard';
 import { CreateAdCampaignDto } from './dto/create-ad-campaign.dto';
 import { CreateAdGroupDto } from './dto/create-ad-group.dto';
+import { CreateGoogleAdsBudgetDto } from './dto/create-google-ads-budget.dto';
 import { ConnectGoogleAdsDto } from './dto/connect-google-ads.dto';
 import { SyncGoogleAdsAudienceDto } from './dto/sync-google-ads-audience.dto';
 import { SyncGoogleAdsMetricsDto } from './dto/sync-google-ads-metrics.dto';
@@ -91,6 +92,16 @@ export class GoogleAdsController {
       body.dateFrom,
       body.dateTo,
     );
+  }
+
+  @Post('budget')
+  @UseGuards(RolesGuard)
+  @Roles('OWNER', 'ADMIN')
+  createBudget(
+    @CurrentTenant() tenantId: string,
+    @Body() body: CreateGoogleAdsBudgetDto,
+  ) {
+    return this.googleAdsService.createBudgetForTenant(tenantId, body);
   }
 
   @Post('campaigns')

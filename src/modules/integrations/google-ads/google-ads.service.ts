@@ -18,10 +18,12 @@ import { PrismaService } from '../../../database/prisma/prisma.service';
 import { SyncQueueService } from '../../../queue/services/sync-queue.service';
 import { GoogleAdsMapper } from './google-ads-mapper';
 import {
+  AdCampaignStatusDto,
   AdCampaignTypeDto,
   CreateAdCampaignDto,
 } from './dto/create-ad-campaign.dto';
 import { CreateAdGroupDto } from './dto/create-ad-group.dto';
+import { CreateGoogleAdsBudgetDto } from './dto/create-google-ads-budget.dto';
 
 type GoogleAdsCredentials = {
   refreshToken: string;
@@ -923,12 +925,14 @@ export class GoogleAdsService {
     const { customerId, accessToken } =
       await this.getTenantGoogleAdsContext(tenantId);
 
-    const budgetResourceName = await this.createBudget(
-      customerId,
-      accessToken,
-      dto.name,
-      dto.budgetDailyMicros,
-    );
+    const budgetResourceName =
+      dto.budgetResourceName ||
+      (await this.createBudget(
+        customerId,
+        accessToken,
+        dto.name,
+        dto.budgetDailyMicros,
+      ));
 
     const externalId = await this.createGoogleCampaign(
       customerId,
@@ -950,6 +954,7 @@ export class GoogleAdsService {
       dto.name,
       dto.type,
       dto.budgetDailyMicros,
+      this.mapDtoStatusToEntityStatus(dto.status),
     );
 
     if (dto.audienceSegmentIds?.length) {
@@ -964,7 +969,36 @@ export class GoogleAdsService {
       `Google Ads campaign created ${externalId} for tenant ${tenantId}`,
     );
 
-    return campaign;
+    return {
+      ...campaign,
+      budgetResourceName,
+      resourceName: this.buildCampaignResourceName(customerId, externalId),
+    };
+  }
+
+  async createBudgetForTenant(
+    tenantId: string,
+    dto: CreateGoogleAdsBudgetDto,
+  ) {
+    const { customerId, accessToken } =
+      await this.getTenantGoogleAdsContext(tenantId);
+
+    const resourceName = await this.createBudget(
+      customerId,
+      accessToken,
+      dto.name,
+      dto.amountMicros,
+      dto.deliveryMethod,
+    );
+
+    return {
+      success: true,
+      customerId,
+      resourceName,
+      name: dto.name,
+      amountMicros: dto.amountMicros,
+      deliveryMethod: dto.deliveryMethod ?? 'STANDARD',
+    };
   }
 
   async createPerformanceMaxCampaign(
@@ -989,7 +1023,7 @@ export class GoogleAdsService {
           campaignOperation: {
             create: {
               name: dto.name,
-              status: 'ENABLED',
+              status: dto.status ?? AdCampaignStatusDto.PAUSED,
               advertisingChannelType: 'PERFORMANCE_MAX',
               campaignBudget: budgetResourceName,
               maximizeConversionValue: {},
@@ -1027,6 +1061,7 @@ export class GoogleAdsService {
       dto.name,
       AdCampaignTypeDto.PERFORMANCE_MAX,
       dto.budgetDailyMicros,
+      this.mapDtoStatusToEntityStatus(dto.status, AdCampaignStatus.ENABLED),
     );
 
     if (dto.audienceSegmentIds?.length) {
@@ -1037,7 +1072,11 @@ export class GoogleAdsService {
       );
     }
 
-    return campaign;
+    return {
+      ...campaign,
+      budgetResourceName,
+      resourceName: this.buildCampaignResourceName(customerId, externalId),
+    };
   }
 
   async createAdGroup(tenantId: string, dto: CreateAdGroupDto) {
@@ -1221,6 +1260,7 @@ export class GoogleAdsService {
     accessToken: string,
     name: string,
     amountMicros: number,
+    deliveryMethod = 'STANDARD',
   ) {
     const response = (await this.mutateGoogleAds({
       accessToken,
@@ -1229,9 +1269,9 @@ export class GoogleAdsService {
         {
           campaignBudgetOperation: {
             create: {
-              name: `Budget - ${name}`,
+              name,
               amountMicros: String(amountMicros),
-              deliveryMethod: 'STANDARD',
+              deliveryMethod,
               explicitlyShared: false,
             },
           },
@@ -1263,9 +1303,10 @@ export class GoogleAdsService {
     budgetResourceName: string,
   ) {
     const advertisingChannelType = this.mapTypeToChannel(dto.type);
+    const status = dto.status ?? AdCampaignStatusDto.PAUSED;
     const createBody: Record<string, unknown> = {
       name: dto.name,
-      status: 'ENABLED',
+      status,
       advertisingChannelType,
       campaignBudget: budgetResourceName,
       targetSpend: {},
@@ -1414,6 +1455,7 @@ export class GoogleAdsService {
     name: string,
     type: AdCampaignTypeDto,
     budgetDailyMicros: number,
+    status: AdCampaignStatus = AdCampaignStatus.PAUSED,
   ) {
     return this.prisma.adCampaign.create({
       data: {
@@ -1421,7 +1463,7 @@ export class GoogleAdsService {
         externalId,
         name,
         type: type as unknown as AdCampaignType,
-        status: AdCampaignStatus.ENABLED,
+        status,
         budgetDaily: new Prisma.Decimal(budgetDailyMicros / 1_000_000),
       },
     });
@@ -1472,5 +1514,19 @@ export class GoogleAdsService {
     };
 
     return mapping[language.toLowerCase()] ?? null;
+  }
+
+  private mapDtoStatusToEntityStatus(
+    status?: AdCampaignStatusDto,
+    fallback: AdCampaignStatus = AdCampaignStatus.PAUSED,
+  ) {
+    switch (status) {
+      case AdCampaignStatusDto.ENABLED:
+        return AdCampaignStatus.ENABLED;
+      case AdCampaignStatusDto.PAUSED:
+        return AdCampaignStatus.PAUSED;
+      default:
+        return fallback;
+    }
   }
 }

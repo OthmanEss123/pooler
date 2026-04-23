@@ -15,6 +15,11 @@ export enum AdCampaignTypeDto {
   VIDEO = 'VIDEO',
 }
 
+export enum AdCampaignStatusDto {
+  ENABLED = 'ENABLED',
+  PAUSED = 'PAUSED',
+}
+
 export class CreateAdCampaignDto {
   @IsString()
   name!: string;
@@ -25,6 +30,14 @@ export class CreateAdCampaignDto {
   @IsNumber()
   @Min(1)
   budgetDailyMicros!: number;
+
+  @IsString()
+  @IsOptional()
+  budgetResourceName?: string;
+
+  @IsEnum(AdCampaignStatusDto)
+  @IsOptional()
+  status?: AdCampaignStatusDto;
 
   @IsArray()
   @IsString({ each: true })
