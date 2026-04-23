@@ -91,10 +91,7 @@ export class GoogleAdsService {
       access_type: 'offline',
       prompt: 'consent',
       state: tenantId,
-      scope: [
-        'https://www.googleapis.com/auth/adwords',
-        'https://www.googleapis.com/auth/analytics.readonly',
-      ].join(' '),
+      scope: 'https://www.googleapis.com/auth/adwords',
     });
 
     return {
