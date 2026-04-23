@@ -204,6 +204,64 @@ export class GoogleAdsService {
     };
   }
 
+  async connectCustomer(tenantId: string, customerId: string) {
+    if (!customerId) {
+      throw new BadRequestException('customerId est requis');
+    }
+
+    const normalizedCustomerId = this.normalizeCustomerId(customerId);
+    const integration = await this.prisma.integration.findUnique({
+      where: {
+        tenantId_type: {
+          tenantId,
+          type: IntegrationType.GOOGLE_ADS,
+        },
+      },
+    });
+
+    if (!integration) {
+      throw new NotFoundException('Integration Google Ads introuvable');
+    }
+
+    const existingMetadata =
+      integration.metadata && typeof integration.metadata === 'object'
+        ? (integration.metadata as Prisma.JsonObject)
+        : {};
+
+    const credentials = integration.credentials
+      ? this.getDecryptedCredentials(integration.credentials)
+      : null;
+
+    const updatedIntegration = await this.prisma.integration.update({
+      where: { id: integration.id },
+      data: {
+        status: IntegrationStatus.ACTIVE,
+        credentials: credentials
+          ? this.encryptionService.encryptJson({
+              ...credentials,
+              customerId: normalizedCustomerId,
+            })
+          : integration.credentials,
+        metadata: {
+          ...existingMetadata,
+          provider: 'google-ads',
+          customerId: normalizedCustomerId,
+          connectedAt:
+            typeof existingMetadata.connectedAt === 'string'
+              ? existingMetadata.connectedAt
+              : new Date().toISOString(),
+        } as Prisma.JsonObject,
+      },
+    });
+
+    return {
+      success: true,
+      integrationId: updatedIntegration.id,
+      customerId: normalizedCustomerId,
+      status: updatedIntegration.status,
+    };
+  }
+
   async disconnect(tenantId: string) {
     const integration = await this.getIntegration(tenantId);
 

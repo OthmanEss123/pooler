@@ -17,6 +17,7 @@ import { Roles } from '../../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../../common/guards/roles.guard';
 import { CreateAdCampaignDto } from './dto/create-ad-campaign.dto';
 import { CreateAdGroupDto } from './dto/create-ad-group.dto';
+import { ConnectGoogleAdsCustomerDto } from './dto/connect-google-ads-customer.dto';
 import { CreateGoogleAdsBudgetDto } from './dto/create-google-ads-budget.dto';
 import { ConnectGoogleAdsDto } from './dto/connect-google-ads.dto';
 import { SyncGoogleAdsAudienceDto } from './dto/sync-google-ads-audience.dto';
@@ -61,6 +62,17 @@ export class GoogleAdsController {
       body.refreshToken,
       body.customerId,
     );
+  }
+
+  @Post('connect-customer')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(RolesGuard)
+  @Roles('OWNER', 'ADMIN')
+  connectCustomer(
+    @CurrentTenant() tenantId: string,
+    @Body() body: ConnectGoogleAdsCustomerDto,
+  ) {
+    return this.googleAdsService.connectCustomer(tenantId, body.customerId);
   }
 
   @Post('disconnect')
