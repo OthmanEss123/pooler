@@ -145,10 +145,12 @@ export class GoogleAdsService {
       );
     }
 
-    const existingIntegration = await this.prisma.integration.findFirst({
+    const existingIntegration = await this.prisma.integration.findUnique({
       where: {
-        tenantId,
-        type: IntegrationType.GOOGLE_ADS,
+        tenantId_type: {
+          tenantId,
+          type: IntegrationType.GOOGLE_ADS,
+        },
       },
     });
 
@@ -176,33 +178,35 @@ export class GoogleAdsService {
         ? existingMetadata.connectedAt
         : new Date().toISOString();
 
-    const integration = existingIntegration
-      ? await this.prisma.integration.update({
-          where: { id: existingIntegration.id },
-          data: {
-            status: IntegrationStatus.ACTIVE,
-            credentials: encryptedCredentials,
-            metadata: {
-              ...existingMetadata,
-              provider: 'google-ads',
-              connectedAt,
-              oauthCompletedAt: new Date().toISOString(),
-            } as Prisma.JsonObject,
-          },
-        })
-      : await this.prisma.integration.create({
-          data: {
-            tenantId,
-            type: IntegrationType.GOOGLE_ADS,
-            status: IntegrationStatus.ACTIVE,
-            credentials: encryptedCredentials,
-            metadata: {
-              provider: 'google-ads',
-              connectedAt,
-              oauthCompletedAt: new Date().toISOString(),
-            } as Prisma.JsonObject,
-          },
-        });
+    const integration = await this.prisma.integration.upsert({
+      where: {
+        tenantId_type: {
+          tenantId,
+          type: IntegrationType.GOOGLE_ADS,
+        },
+      },
+      update: {
+        status: IntegrationStatus.ACTIVE,
+        credentials: encryptedCredentials,
+        metadata: {
+          ...existingMetadata,
+          provider: 'google-ads',
+          connectedAt,
+          oauthCompletedAt: new Date().toISOString(),
+        } as Prisma.JsonObject,
+      },
+      create: {
+        tenantId,
+        type: IntegrationType.GOOGLE_ADS,
+        status: IntegrationStatus.ACTIVE,
+        credentials: encryptedCredentials,
+        metadata: {
+          provider: 'google-ads',
+          connectedAt,
+          oauthCompletedAt: new Date().toISOString(),
+        } as Prisma.JsonObject,
+      },
+    });
 
     return {
       success: true,
