@@ -276,33 +276,19 @@ export class GoogleAdsService {
     }
 
     const normalizedCustomerId = this.normalizeCustomerId(customerId);
-    const integration = await this.prisma.integration.findFirst({
+    const integration = await this.prisma.integration.findUnique({
       where: {
-        tenantId,
-        type: IntegrationType.GOOGLE_ADS,
+        tenantId_type: {
+          tenantId,
+          type: IntegrationType.GOOGLE_ADS,
+        },
       },
     });
 
     if (!integration) {
-      const createdIntegration = await this.prisma.integration.create({
-        data: {
-          tenantId,
-          type: IntegrationType.GOOGLE_ADS,
-          status: IntegrationStatus.ACTIVE,
-          metadata: {
-            provider: 'google-ads',
-            customerId: normalizedCustomerId,
-            connectedAt: new Date().toISOString(),
-          } as Prisma.JsonObject,
-        },
-      });
-
-      return {
-        success: true,
-        integrationId: createdIntegration.id,
-        customerId: normalizedCustomerId,
-        status: createdIntegration.status,
-      };
+      throw new NotFoundException(
+        'Integration Google Ads introuvable. Termine d abord le callback OAuth.',
+      );
     }
 
     const existingMetadata =
@@ -310,20 +296,15 @@ export class GoogleAdsService {
         ? (integration.metadata as Prisma.JsonObject)
         : {};
 
-    const credentials = integration.credentials
-      ? this.getDecryptedCredentials(integration.credentials)
-      : null;
+    const credentials = this.getDecryptedCredentials(integration.credentials);
 
     const updatedIntegration = await this.prisma.integration.update({
       where: { id: integration.id },
       data: {
-        status: IntegrationStatus.ACTIVE,
-        credentials: credentials
-          ? this.encryptionService.encryptJson({
-              ...credentials,
-              customerId: normalizedCustomerId,
-            })
-          : integration.credentials,
+        credentials: this.encryptionService.encryptJson({
+          ...credentials,
+          customerId: normalizedCustomerId,
+        }),
         metadata: {
           ...existingMetadata,
           provider: 'google-ads',
@@ -1128,10 +1109,7 @@ export class GoogleAdsService {
     };
   }
 
-  async createBudgetForTenant(
-    tenantId: string,
-    dto: CreateGoogleAdsBudgetDto,
-  ) {
+  async createBudgetForTenant(tenantId: string, dto: CreateGoogleAdsBudgetDto) {
     const { customerId, accessToken } =
       await this.getTenantGoogleAdsContext(tenantId);
 
