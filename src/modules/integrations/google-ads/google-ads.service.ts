@@ -27,7 +27,7 @@ import { CreateGoogleAdsBudgetDto } from './dto/create-google-ads-budget.dto';
 
 type GoogleAdsCredentials = {
   refreshToken: string;
-  customerId: string;
+  customerId?: string;
 };
 
 type GoogleOAuthTokenResponse = {
@@ -145,12 +145,74 @@ export class GoogleAdsService {
       );
     }
 
+    const existingIntegration = await this.prisma.integration.findFirst({
+      where: {
+        tenantId,
+        type: IntegrationType.GOOGLE_ADS,
+      },
+    });
+
+    const existingMetadata =
+      existingIntegration?.metadata &&
+      typeof existingIntegration.metadata === 'object'
+        ? (existingIntegration.metadata as Prisma.JsonObject)
+        : {};
+
+    const existingCredentials = existingIntegration?.credentials
+      ? this.getDecryptedCredentials(existingIntegration.credentials)
+      : null;
+
+    const encryptedCredentials = this.encryptionService.encryptJson({
+      refreshToken: tokens.refresh_token,
+      customerId:
+        existingCredentials?.customerId ||
+        (typeof existingMetadata.customerId === 'string'
+          ? existingMetadata.customerId
+          : undefined),
+    });
+
+    const connectedAt =
+      typeof existingMetadata.connectedAt === 'string'
+        ? existingMetadata.connectedAt
+        : new Date().toISOString();
+
+    const integration = existingIntegration
+      ? await this.prisma.integration.update({
+          where: { id: existingIntegration.id },
+          data: {
+            status: IntegrationStatus.ACTIVE,
+            credentials: encryptedCredentials,
+            metadata: {
+              ...existingMetadata,
+              provider: 'google-ads',
+              connectedAt,
+              oauthCompletedAt: new Date().toISOString(),
+            } as Prisma.JsonObject,
+          },
+        })
+      : await this.prisma.integration.create({
+          data: {
+            tenantId,
+            type: IntegrationType.GOOGLE_ADS,
+            status: IntegrationStatus.ACTIVE,
+            credentials: encryptedCredentials,
+            metadata: {
+              provider: 'google-ads',
+              connectedAt,
+              oauthCompletedAt: new Date().toISOString(),
+            } as Prisma.JsonObject,
+          },
+        });
+
     return {
       success: true,
       tenantId,
-      refreshToken: tokens.refresh_token,
+      integrationId: integration.id,
+      hasCustomerId: Boolean(
+        existingCredentials?.customerId || existingMetadata.customerId,
+      ),
       message:
-        'Refresh token recupere. Le customerId doit etre fourni separement pour connecter le compte Google Ads.',
+        'Refresh token enregistre dans l integration Google Ads. Le customerId peut etre associe ensuite via connect-customer si besoin.',
     };
   }
 
@@ -304,9 +366,10 @@ export class GoogleAdsService {
     const integration = await this.getActiveIntegration(tenantId);
     const credentials = this.getDecryptedCredentials(integration.credentials);
     const accessToken = await this.getAccessToken(credentials.refreshToken);
+    const customerId = this.requireCustomerId(credentials);
     const rows = await this.fetchCampaigns({
       accessToken,
-      customerId: credentials.customerId,
+      customerId,
     });
 
     let syncedCount = 0;
@@ -390,9 +453,10 @@ export class GoogleAdsService {
     const integration = await this.getActiveIntegration(tenantId);
     const credentials = this.getDecryptedCredentials(integration.credentials);
     const accessToken = await this.getAccessToken(credentials.refreshToken);
+    const customerId = this.requireCustomerId(credentials);
     const rows = await this.fetchMetrics({
       accessToken,
-      customerId: credentials.customerId,
+      customerId,
       dateFrom: normalizedDateFrom,
       dateTo: normalizedDateTo,
     });
@@ -682,7 +746,7 @@ export class GoogleAdsService {
     return {
       campaign,
       accessToken,
-      customerId: credentials.customerId,
+      customerId: this.requireCustomerId(credentials),
     };
   }
 
@@ -797,6 +861,16 @@ export class GoogleAdsService {
     }
 
     return this.encryptionService.decryptJson<GoogleAdsCredentials>(encrypted);
+  }
+
+  private requireCustomerId(credentials: GoogleAdsCredentials) {
+    if (!credentials.customerId) {
+      throw new BadRequestException(
+        'Customer ID Google Ads manquant. Termine le lien via connect-customer.',
+      );
+    }
+
+    return credentials.customerId;
   }
 
   private async getAccessToken(refreshToken: string): Promise<string> {
@@ -1518,7 +1592,7 @@ export class GoogleAdsService {
     const accessToken = await this.getAccessToken(credentials.refreshToken);
 
     return {
-      customerId: credentials.customerId,
+      customerId: this.requireCustomerId(credentials),
       accessToken,
     };
   }
