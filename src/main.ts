@@ -12,6 +12,18 @@ import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 
+function isEnabled(value: unknown, defaultValue = true): boolean {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    return value.toLowerCase() !== 'false';
+  }
+
+  return defaultValue;
+}
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     rawBody: true,
@@ -66,19 +78,11 @@ async function bootstrap() {
   );
 
   app.enableCors({
-    origin:
-      nodeEnv === 'production'
-        ? (
-            origin: string | undefined,
-            callback: (error: Error | null, allow?: boolean) => void,
-          ) => {
-            if (!origin || origin === frontendUrl) {
-              return callback(null, true);
-            }
-
-            return callback(new Error('CORS origin not allowed'), false);
-          }
-        : true,
+    origin: [
+      'http://localhost:3001',
+      'http://localhost:3000',
+      frontendUrl,
+    ].filter(Boolean),
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: [
@@ -90,6 +94,7 @@ async function bootstrap() {
       'x-api-key',
       'x-metrics-token',
       'x-admin-token',
+      'Cookie',
     ],
     exposedHeaders: ['X-Request-ID'],
   });
@@ -108,7 +113,7 @@ function registerBullBoard(
   configService: ConfigService,
   logger: Logger,
 ) {
-  const queueEnabled = configService.get<boolean>('QUEUE_ENABLED', true);
+  const queueEnabled = isEnabled(configService.get('QUEUE_ENABLED'), true);
   const adminToken = configService.get<string>('ADMIN_TOKEN');
 
   if (!queueEnabled || !adminToken) {

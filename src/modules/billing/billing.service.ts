@@ -96,15 +96,21 @@ type BillingUsage = {
 @Injectable()
 export class BillingService {
   private readonly logger = new Logger(BillingService.name);
-  private readonly stripe: Stripe.Stripe;
+  private readonly stripe: Stripe.Stripe | null;
+  private readonly stripeSecretKey: string;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
   ) {
-    this.stripe = Stripe(
-      this.configService.get<string>('stripe.secretKey', ''),
-    );
+    const secretKey = this.configService.get<string>('stripe.secretKey', '');
+    this.stripeSecretKey = secretKey;
+    this.stripe = secretKey ? Stripe(secretKey) : null;
+    if (!secretKey) {
+      this.logger.warn(
+        'STRIPE_SECRET_KEY is not set — billing will run in mock mode.',
+      );
+    }
   }
 
   getPlans() {
@@ -132,7 +138,7 @@ export class BillingService {
     const stripeCustomerId = this.isStripeMockEnabled()
       ? `cus_mock_${tenantId}`
       : (
-          await this.stripe.customers.create({
+          await this.getStripe().customers.create({
             email: ownerEmail ?? undefined,
             name: tenant?.name ?? tenantId,
             metadata: {
@@ -197,7 +203,7 @@ export class BillingService {
       };
     }
 
-    const subscription = (await this.stripe.subscriptions.create({
+    const subscription = (await this.getStripe().subscriptions.create({
       customer: customerId,
       items: [{ price: priceId }],
       payment_behavior: 'default_incomplete',
@@ -258,7 +264,7 @@ export class BillingService {
       });
     }
 
-    const updated = (await this.stripe.subscriptions.update(
+    const updated = (await this.getStripe().subscriptions.update(
       subscription.stripeSubscriptionId,
       {
         cancel_at_period_end: true,
@@ -297,7 +303,7 @@ export class BillingService {
       });
     }
 
-    const updated = (await this.stripe.subscriptions.update(
+    const updated = (await this.getStripe().subscriptions.update(
       subscription.stripeSubscriptionId,
       {
         cancel_at_period_end: false,
@@ -327,7 +333,7 @@ export class BillingService {
       };
     }
 
-    const session = await this.stripe.billingPortal.sessions.create({
+    const session = await this.getStripe().billingPortal.sessions.create({
       customer: customerId,
       return_url: safeReturnUrl,
     });
@@ -379,7 +385,7 @@ export class BillingService {
         : [];
     }
 
-    const invoices = (await this.stripe.invoices.list({
+    const invoices = (await this.getStripe().invoices.list({
       customer: subscription.stripeCustomerId,
       limit: 12,
     })) as unknown as { data: StripeInvoicePayload[] };
@@ -401,7 +407,7 @@ export class BillingService {
       throw new BadRequestException('Signature Stripe manquante');
     }
 
-    const event = this.stripe.webhooks.constructEvent(
+    const event = this.getStripe().webhooks.constructEvent(
       rawBody,
       signature,
       this.configService.get<string>('stripe.webhookSecret', ''),
@@ -745,10 +751,18 @@ export class BillingService {
 
   private isStripeMockEnabled() {
     return (
+      !this.stripe ||
+      !this.stripeSecretKey ||
       (process.env.NODE_ENV ?? 'development') === 'test' ||
-      this.configService
-        .get<string>('stripe.secretKey', '')
-        .startsWith('sk_test_mock')
+      this.stripeSecretKey.startsWith('sk_test_mock')
     );
+  }
+
+  private getStripe() {
+    if (!this.stripe) {
+      throw new BadRequestException('Stripe is not configured');
+    }
+
+    return this.stripe;
   }
 }

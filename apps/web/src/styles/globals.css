@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  background: #FFFFFF;
+  color: #0F172A;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: #FFFFFF;
+}
+
+body {
+  min-height: 100%;
+  margin: 0;
+  background: #FFFFFF;
+  color: #0F172A;
+  font-feature-settings:
+    "rlig" 1,
+    "calt" 1;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(10, 10, 10, 0.12);
+}
+
+@layer components {
+  .focus-ring {
+    @apply outline-none ring-offset-2 ring-offset-white focus-visible:ring-2 focus-visible:ring-black;
+  }
+
+  .auth-field {
+    @apply h-11 w-full rounded-xl border border-[#22252c] bg-[#13161c] px-3.5 text-sm font-semibold text-white outline-none transition-all duration-300 placeholder:text-slate-500 focus:border-blue-500/80 focus:ring-2 focus:ring-blue-500/10 focus:shadow-[0_0_12px_rgba(59,130,246,0.15)] disabled:cursor-not-allowed disabled:opacity-70;
+  }
+
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+/* Override Chrome/Safari autofill background and text color to match dark mode */
+input:-webkit-autofill,
+input:-webkit-autofill:hover, 
+input:-webkit-autofill:focus, 
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #15181d inset !important;
+  -webkit-text-fill-color: #ffffff !important;
+  transition: background-color 5000s ease-in-out 0s;
+}

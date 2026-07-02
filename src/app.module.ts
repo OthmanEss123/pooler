@@ -29,6 +29,7 @@ import { MetricsModule } from './modules/metrics/metrics.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { PostsModule } from './modules/posts/posts.module';
 import { ProductsModule } from './modules/products/products.module';
+import { SegmentsModule } from './modules/segments/segments.module';
 import { TenantsModule } from './modules/tenants/tenants.module';
 import { QueueModule } from './queue/queue.module';
 import { RedisModule } from './redis/redis.module';
@@ -79,6 +80,7 @@ const nodeEnv = process.env.NODE_ENV ?? 'development';
     OrdersModule,
     PostsModule,
     ProductsModule,
+    SegmentsModule,
     QueueModule,
     AnalyticsModule,
     MetricsModule,

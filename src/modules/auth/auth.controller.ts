@@ -35,6 +35,16 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Public()
+  @Get('check-email')
+  async checkEmail(@Query('email') email?: string) {
+    if (!email) {
+      return { exists: false };
+    }
+    const exists = await this.authService.checkEmailExists(email);
+    return { exists };
+  }
+
+  @Public()
   @Throttle({
     auth: { limit: 5, ttl: 60000 },
   })

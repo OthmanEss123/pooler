@@ -112,7 +112,12 @@ export class OrdersService {
 
       const created = await tx.order.findFirst({
         where: { id: order.id, tenantId },
-        include: { items: true },
+        include: {
+          items: true,
+          contact: {
+            select: { email: true, firstName: true, lastName: true },
+          },
+        },
       });
 
       if (!created) {
@@ -169,7 +174,12 @@ export class OrdersService {
     const [data, total] = await this.prisma.$transaction([
       this.prisma.order.findMany({
         where,
-        include: { items: true },
+        include: {
+          items: true,
+          contact: {
+            select: { email: true, firstName: true, lastName: true },
+          },
+        },
         orderBy: { placedAt: 'desc' },
         skip: offset,
         take: limit,
@@ -183,7 +193,12 @@ export class OrdersService {
   async findOne(tenantId: string, id: string) {
     const order = await this.prisma.order.findFirst({
       where: { id, tenantId },
-      include: { items: true },
+      include: {
+        items: true,
+        contact: {
+          select: { email: true, firstName: true, lastName: true },
+        },
+      },
     });
 
     if (!order) {
@@ -388,7 +403,12 @@ export class OrdersService {
 
       const updated = await tx.order.findFirst({
         where: { id: orderId, tenantId },
-        include: { items: true },
+        include: {
+          items: true,
+          contact: {
+            select: { email: true, firstName: true, lastName: true },
+          },
+        },
       });
 
       if (!updated) {

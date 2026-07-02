@@ -63,10 +63,31 @@ docker compose up -d postgres redis clickhouse
 
 ## Validation
 
+### Backend
 ```bash
-npx prisma validate
+# Validation des types (backend uniquement)
 npx tsc --noEmit
+
+# Linter
 npm run lint
+
+# Build
 npm run build
+
+# Tests
+npm run test:unit
 npm run test:e2e
+```
+
+### Frontend (Next.js)
+```bash
+# Validation des types (depuis le dossier apps/web)
+cd apps/web
+npm run type-check
+
+# Linter
+npm run lint
+
+# Build
+npm run build
 ```

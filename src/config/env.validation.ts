@@ -28,11 +28,12 @@ export const envValidation = Joi.object({
   METRICS_TOKEN: Joi.string().allow('').optional(),
   APP_VERSION: Joi.string().default('2.0.0'),
 
-  STRIPE_SECRET_KEY: Joi.string().required(),
-  STRIPE_WEBHOOK_SECRET: Joi.string().required(),
-  STRIPE_STARTER_PRICE_ID: Joi.string().required(),
-  STRIPE_GROWTH_PRICE_ID: Joi.string().required(),
-  STRIPE_SCALE_PRICE_ID: Joi.string().required(),
+  // Stripe — optionnel en développement local
+  STRIPE_SECRET_KEY: Joi.string().allow('').optional(),
+  STRIPE_WEBHOOK_SECRET: Joi.string().allow('').optional(),
+  STRIPE_STARTER_PRICE_ID: Joi.string().allow('').optional(),
+  STRIPE_GROWTH_PRICE_ID: Joi.string().allow('').optional(),
+  STRIPE_SCALE_PRICE_ID: Joi.string().allow('').optional(),
 
   WOOCOMMERCE_WEBHOOK_SECRET: Joi.string().allow('').optional(),
   WORDPRESS_WEBHOOK_SECRET: Joi.string().allow('').optional(),

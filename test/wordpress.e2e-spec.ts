@@ -281,7 +281,7 @@ describe('WordPress (e2e)', () => {
             name: 'Client One',
             roles: ['subscriber'],
           },
-        ]);
+        ] as any);
       },
     );
 

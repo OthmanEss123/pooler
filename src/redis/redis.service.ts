@@ -13,6 +13,8 @@ export class RedisService implements OnModuleDestroy {
   private readonly redisUrl: string;
   private readonly client?: IORedis;
   private readonly memoryStore = new Map<string, MemoryEntry>();
+  private redisAvailable = true;
+  private redisWarningLogged = false;
 
   constructor(private readonly configService: ConfigService) {
     this.redisUrl = this.configService.get<string>(
@@ -25,6 +27,10 @@ export class RedisService implements OnModuleDestroy {
         maxRetriesPerRequest: 1,
         enableReadyCheck: false,
         lazyConnect: true,
+        retryStrategy: () => null,
+      });
+      this.client.on('error', (error) => {
+        this.markRedisUnavailable(error);
       });
     }
   }
@@ -34,9 +40,37 @@ export class RedisService implements OnModuleDestroy {
   }
 
   private async ensureConnected(): Promise<void> {
-    if (this.client?.status === 'wait') {
-      await this.client.connect();
+    if (!this.client || !this.redisAvailable) {
+      return;
     }
+
+    if (this.client?.status === 'wait') {
+      try {
+        await this.client.connect();
+      } catch (error) {
+        this.markRedisUnavailable(error);
+        throw error;
+      }
+    }
+  }
+
+  private shouldUseMemory(): boolean {
+    return !this.client || !this.redisAvailable || this.client.status === 'end';
+  }
+
+  private markRedisUnavailable(error: unknown): void {
+    this.redisAvailable = false;
+
+    if (this.redisWarningLogged) {
+      return;
+    }
+
+    this.redisWarningLogged = true;
+    this.logger.warn(
+      `Redis unavailable, using in-memory fallback: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
   }
 
   private getMemoryEntry(key: string): string | null {
@@ -54,41 +88,43 @@ export class RedisService implements OnModuleDestroy {
   }
 
   async ping(): Promise<string> {
-    if (!this.client) {
+    if (this.shouldUseMemory()) {
       return 'PONG';
     }
 
     try {
       await this.ensureConnected();
-      return await this.client.ping();
+      return await this.client!.ping();
     } catch (error) {
-      this.logger.error(
-        'Redis ping failed',
-        error instanceof Error ? error.stack : String(error),
-      );
-      throw error;
+      this.markRedisUnavailable(error);
+      return 'PONG';
     }
   }
 
   async isHealthy(): Promise<boolean> {
     try {
-      return (await this.ping()) === 'PONG';
+      return this.shouldUseMemory() || (await this.ping()) === 'PONG';
     } catch {
-      return false;
+      return this.shouldUseMemory();
     }
   }
 
   async get(key: string): Promise<string | null> {
-    if (!this.client) {
+    if (this.shouldUseMemory()) {
       return this.getMemoryEntry(key);
     }
 
-    await this.ensureConnected();
-    return this.client.get(key);
+    try {
+      await this.ensureConnected();
+      return await this.client!.get(key);
+    } catch (error) {
+      this.markRedisUnavailable(error);
+      return this.getMemoryEntry(key);
+    }
   }
 
   async set(key: string, value: string, ttlSeconds?: number): Promise<void> {
-    if (!this.client) {
+    if (this.shouldUseMemory()) {
       this.memoryStore.set(key, {
         value,
         expiresAt:
@@ -97,23 +133,38 @@ export class RedisService implements OnModuleDestroy {
       return;
     }
 
-    await this.ensureConnected();
+    try {
+      await this.ensureConnected();
 
-    if (ttlSeconds && ttlSeconds > 0) {
-      await this.client.set(key, value, 'EX', ttlSeconds);
+      if (ttlSeconds && ttlSeconds > 0) {
+        await this.client!.set(key, value, 'EX', ttlSeconds);
+        return;
+      }
+
+      await this.client!.set(key, value);
+    } catch (error) {
+      this.markRedisUnavailable(error);
+      this.memoryStore.set(key, {
+        value,
+        expiresAt:
+          ttlSeconds && ttlSeconds > 0 ? Date.now() + ttlSeconds * 1000 : null,
+      });
       return;
     }
-
-    await this.client.set(key, value);
   }
 
   async del(key: string): Promise<number> {
-    if (!this.client) {
+    if (this.shouldUseMemory()) {
       return this.memoryStore.delete(key) ? 1 : 0;
     }
 
-    await this.ensureConnected();
-    return this.client.del(key);
+    try {
+      await this.ensureConnected();
+      return await this.client!.del(key);
+    } catch (error) {
+      this.markRedisUnavailable(error);
+      return this.memoryStore.delete(key) ? 1 : 0;
+    }
   }
 
   async onModuleDestroy(): Promise<void> {

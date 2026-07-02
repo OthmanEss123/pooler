@@ -3,6 +3,18 @@ import { ConfigService } from '@nestjs/config';
 import { QueueEvents } from 'bullmq';
 import { RedisService } from '../redis/redis.service';
 
+function isEnabled(value: unknown, defaultValue = true): boolean {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    return value.toLowerCase() !== 'false';
+  }
+
+  return defaultValue;
+}
+
 @Injectable()
 export class QueueEventsService implements OnModuleDestroy {
   private readonly logger = new Logger(QueueEventsService.name);
@@ -15,7 +27,10 @@ export class QueueEventsService implements OnModuleDestroy {
     private readonly configService: ConfigService,
     private readonly redisService: RedisService,
   ) {
-    this.queueEnabled = this.configService.get<boolean>('QUEUE_ENABLED', true);
+    this.queueEnabled = isEnabled(
+      this.configService.get('QUEUE_ENABLED'),
+      true,
+    );
 
     if (!this.queueEnabled) {
       return;

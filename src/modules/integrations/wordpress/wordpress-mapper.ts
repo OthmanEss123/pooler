@@ -52,7 +52,10 @@ export class WordPressMapper {
 
   private buildFallbackEmail(wpUser: WordPressUser): string | null {
     const candidate = [wpUser.slug, wpUser.username, wpUser.name]
-      .find((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      .find(
+        (value): value is string =>
+          typeof value === 'string' && value.trim().length > 0,
+      )
       ?.trim()
       .toLowerCase();
 

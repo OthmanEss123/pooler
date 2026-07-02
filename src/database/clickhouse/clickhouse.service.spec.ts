@@ -16,7 +16,9 @@ type ClickhouseClientMock = {
   query: jest.Mock;
 };
 
-const createClientMock = createClient as jest.MockedFunction<typeof createClient>;
+const createClientMock = createClient as jest.MockedFunction<
+  typeof createClient
+>;
 
 function makeConfigService(values: ConfigValues): ConfigService {
   return {

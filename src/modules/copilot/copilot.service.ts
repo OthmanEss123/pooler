@@ -91,9 +91,7 @@ export class CopilotService {
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
-      this.logger.error(
-        `Copilot provider request failed: ${errorMessage}`,
-      );
+      this.logger.error(`Copilot provider request failed: ${errorMessage}`);
       console.error('COPILOT_PROVIDER_ERROR', errorMessage);
       return {
         answer: this.fallbackAnswerText(question),
@@ -137,9 +135,7 @@ export class CopilotService {
       });
     }
 
-    throw new Error(
-      'No Copilot provider configured. Set OPENROUTER_API_KEY.',
-    );
+    throw new Error('No Copilot provider configured. Set OPENROUTER_API_KEY.');
   }
 
   private async fetchChatCompletion(params: {

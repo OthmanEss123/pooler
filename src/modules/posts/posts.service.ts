@@ -74,9 +74,7 @@ export class PostsService {
     };
   }
 
-  private asRecord(
-    value: Prisma.JsonValue | null | unknown,
-  ): Record<string, unknown> {
+  private asRecord(value: unknown): Record<string, unknown> {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       return {};
     }

@@ -40,5 +40,13 @@ export class RegisterDto {
 
   @IsOptional()
   @IsString()
+  avatarUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  logoUrl?: string;
+
+  @IsOptional()
+  @IsString()
   inviteToken?: string;
 }

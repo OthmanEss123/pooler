@@ -2246,11 +2246,7 @@ export const createPrismaMock = () => {
         },
       ),
       findFirst: jest.fn(
-        async ({
-          where,
-        }: {
-          where?: { tenantId?: string; id?: string };
-        }) => {
+        async ({ where }: { where?: { tenantId?: string; id?: string } }) => {
           return (
             wordpressPosts.find((candidate) => {
               if (where?.tenantId && candidate.tenantId !== where.tenantId) {
@@ -2325,7 +2321,10 @@ export const createPrismaMock = () => {
             return 0;
           });
 
-          return filtered.slice(skip ?? 0, (skip ?? 0) + (take ?? filtered.length));
+          return filtered.slice(
+            skip ?? 0,
+            (skip ?? 0) + (take ?? filtered.length),
+          );
         },
       ),
       count: jest.fn(async ({ where }: { where?: { tenantId?: string } }) => {

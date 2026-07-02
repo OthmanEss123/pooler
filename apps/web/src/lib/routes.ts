@@ -1,0 +1,17 @@
+export const routes = {
+  home: "/dashboard",
+  login: "/login",
+  register: "/register",
+  mfa: "/mfa",
+  dashboard: "/dashboard",
+  analytics: "/analytics",
+  contacts: "/contacts",
+  orders: "/orders",
+  products: "/products",
+  segments: "/segments",
+  integrations: "/integrations",
+  copilot: "/copilot",
+  settingsTeam: "/settings/team",
+  settingsBilling: "/settings/billing",
+  settingsApiKeys: "/settings/api-keys",
+} as const;

@@ -1,33 +1,12 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
-import { IntegrationStatus, IntegrationType, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { EncryptionService } from '../../../common/services/encryption.service';
 import { ClickhouseService } from '../../../database/clickhouse/clickhouse.service';
 import { PrismaService } from '../../../database/prisma/prisma.service';
 import { SyncQueueService } from '../../../queue/services/sync-queue.service';
 import { GoogleAdsService } from './google-ads.service';
-
-type GoogleAdsCredentials = {
-  refreshToken: string;
-  customerId?: string;
-};
-
-type GoogleAdsIntegrationUpsertArgs = {
-  create: {
-    credentials: string;
-    status: IntegrationStatus;
-  };
-  update: {
-    credentials: string;
-    status: IntegrationStatus;
-  };
-};
-
-type GoogleAdsIntegrationUpdateArgs = {
-  where: { id: string };
-  data: { credentials: string; metadata: Prisma.JsonObject };
-};
 
 const encryptionKey =
   '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
@@ -52,6 +31,13 @@ const prismaMock = {
     upsert: jest.fn(),
     update: jest.fn(),
     create: jest.fn(),
+    updateMany: jest.fn(),
+  },
+  googleAdsConnection: {
+    findFirst: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+    delete: jest.fn(),
   },
 };
 
@@ -92,18 +78,26 @@ describe('GoogleAdsService', () => {
     jest.restoreAllMocks();
   });
 
-  it('upserts Google Ads integration from OAuth callback with encrypted refreshToken credentials', async () => {
-    let capturedUpsertArgs: GoogleAdsIntegrationUpsertArgs | undefined;
+  it('upserts Google Ads connection from OAuth callback with encrypted refreshToken credentials', async () => {
+    let capturedCreateArgs: Prisma.GoogleAdsConnectionCreateArgs | undefined;
 
-    prismaMock.integration.findUnique.mockResolvedValue(null);
-    prismaMock.integration.upsert.mockImplementation(
-      (args: GoogleAdsIntegrationUpsertArgs) => {
-        capturedUpsertArgs = args;
+    prismaMock.googleAdsConnection.findFirst.mockResolvedValue(null);
+    prismaMock.googleAdsConnection.create.mockImplementation(
+      (args: Prisma.GoogleAdsConnectionCreateArgs) => {
+        capturedCreateArgs = args;
 
-        return {
-          id: 'integration-1',
-          ...args.create,
-        };
+        return Promise.resolve({
+          id: 'connection-1',
+          tenantId: args.data.tenantId,
+          customerId: args.data.customerId || 'A_DEMANDER_APRES',
+          refreshTokenEncrypted: args.data.refreshTokenEncrypted,
+          accessTokenEncrypted: args.data.accessTokenEncrypted ?? null,
+          expiresAt: args.data.expiresAt ? new Date(args.data.expiresAt) : null,
+          connectedAt: new Date(),
+          updatedAt: new Date(),
+          userId: null,
+          loginCustomerId: null,
+        });
       },
     );
     fetchMock.mockResolvedValue({
@@ -120,139 +114,121 @@ describe('GoogleAdsService', () => {
 
     const result = await service.handleOAuthCallback('tenant-1', 'oauth-code');
 
-    expect(prismaMock.integration.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          tenantId_type: {
-            tenantId: 'tenant-1',
-            type: IntegrationType.GOOGLE_ADS,
-          },
-        },
-      }),
-    );
-    expect(capturedUpsertArgs).toBeDefined();
+    expect(prismaMock.googleAdsConnection.findFirst).toHaveBeenCalledWith({
+      where: { tenantId: 'tenant-1' },
+      orderBy: { connectedAt: 'desc' },
+    });
+    expect(capturedCreateArgs).toBeDefined();
 
-    const upsertArgs = capturedUpsertArgs as GoogleAdsIntegrationUpsertArgs;
-
-    expect(upsertArgs.create.status).toBe(IntegrationStatus.ACTIVE);
-    expect(upsertArgs.update.status).toBe(IntegrationStatus.ACTIVE);
-    expect(upsertArgs.create.credentials).not.toContain(
+    const createdData = capturedCreateArgs!.data;
+    expect(createdData.refreshTokenEncrypted).toBeDefined();
+    expect(encryptionService.decrypt(createdData.refreshTokenEncrypted)).toBe(
       'refresh-token-from-oauth',
     );
-
-    const credentials = encryptionService.decryptJson<GoogleAdsCredentials>(
-      upsertArgs.create.credentials,
-    );
-
-    expect(credentials).toEqual({
-      refreshToken: 'refresh-token-from-oauth',
-    });
     expect(result).toEqual(
       expect.objectContaining({
         success: true,
         tenantId: 'tenant-1',
-        integrationId: 'integration-1',
+        integrationId: 'connection-1',
       }),
     );
   });
 
-  it('connectCustomer adds customerId on the existing OAuth integration credentials', async () => {
-    let capturedUpdateArgs: GoogleAdsIntegrationUpdateArgs | undefined;
-    const existingCredentials = encryptionService.encryptJson({
-      refreshToken: 'refresh-token-from-oauth',
-    });
-    const existingIntegration = {
-      id: 'integration-1',
+  it('connectCustomer adds customerId on the existing OAuth connection', async () => {
+    let capturedUpdateArgs: Prisma.GoogleAdsConnectionUpdateArgs | undefined;
+    const existingConnection = {
+      id: 'connection-1',
       tenantId: 'tenant-1',
-      type: IntegrationType.GOOGLE_ADS,
-      status: IntegrationStatus.ACTIVE,
-      credentials: existingCredentials,
-      metadata: {
-        provider: 'google-ads',
-        connectedAt: '2026-04-24T08:00:00.000Z',
-      } satisfies Prisma.JsonObject,
-      lastSyncAt: null,
-      createdAt: new Date(),
+      customerId: 'A_DEMANDER_APRES',
+      refreshTokenEncrypted: encryptionService.encrypt(
+        'refresh-token-from-oauth',
+      ),
+      accessTokenEncrypted: encryptionService.encrypt('access-token'),
+      expiresAt: new Date(),
+      connectedAt: new Date(),
       updatedAt: new Date(),
+      userId: null,
+      loginCustomerId: null,
     };
 
-    prismaMock.integration.findUnique.mockResolvedValue(existingIntegration);
-    prismaMock.integration.update.mockImplementation(
-      (args: GoogleAdsIntegrationUpdateArgs) => {
+    prismaMock.googleAdsConnection.findFirst.mockResolvedValue(
+      existingConnection,
+    );
+    prismaMock.googleAdsConnection.update.mockImplementation(
+      (args: Prisma.GoogleAdsConnectionUpdateArgs) => {
         capturedUpdateArgs = args;
 
-        return {
-          ...existingIntegration,
-          ...args.data,
-        };
+        return Promise.resolve({
+          ...existingConnection,
+          customerId: args.data.customerId as string,
+        });
       },
     );
 
     const result = await service.connectCustomer('tenant-1', '123-456-7890');
 
-    expect(prismaMock.integration.findUnique).toHaveBeenCalledWith({
-      where: {
-        tenantId_type: {
-          tenantId: 'tenant-1',
-          type: IntegrationType.GOOGLE_ADS,
-        },
-      },
+    expect(prismaMock.googleAdsConnection.findFirst).toHaveBeenCalledWith({
+      where: { tenantId: 'tenant-1' },
+      orderBy: { connectedAt: 'desc' },
     });
-    expect(prismaMock.integration.create).not.toHaveBeenCalled();
+    expect(prismaMock.googleAdsConnection.update).toHaveBeenCalled();
     expect(capturedUpdateArgs).toBeDefined();
 
-    const updateArgs = capturedUpdateArgs as GoogleAdsIntegrationUpdateArgs;
-    const credentials = encryptionService.decryptJson<GoogleAdsCredentials>(
-      updateArgs.data.credentials,
-    );
-
-    expect(updateArgs.where).toEqual({ id: 'integration-1' });
-    expect(credentials).toEqual({
-      refreshToken: 'refresh-token-from-oauth',
-      customerId: '1234567890',
-    });
-    expect(updateArgs.data.metadata).toEqual(
-      expect.objectContaining({
-        customerId: '1234567890',
-        connectedAt: '2026-04-24T08:00:00.000Z',
-      }),
-    );
+    expect(capturedUpdateArgs!.where).toEqual({ id: 'connection-1' });
+    expect(capturedUpdateArgs!.data).toEqual({ customerId: '1234567890' });
     expect(result).toEqual(
       expect.objectContaining({
         success: true,
-        integrationId: 'integration-1',
+        integrationId: 'connection-1',
         customerId: '1234567890',
-        status: IntegrationStatus.ACTIVE,
+        status: 'ACTIVE',
       }),
     );
   });
 
-  it('connectCustomer refuses to create a Google Ads integration before OAuth callback', async () => {
-    prismaMock.integration.findUnique.mockResolvedValue(null);
+  it('connectCustomer refuses to set customerId before OAuth callback', async () => {
+    prismaMock.googleAdsConnection.findFirst.mockResolvedValue(null);
 
     await expect(
       service.connectCustomer('tenant-1', '1234567890'),
     ).rejects.toThrow(NotFoundException);
-    expect(prismaMock.integration.create).not.toHaveBeenCalled();
-    expect(prismaMock.integration.update).not.toHaveBeenCalled();
+    expect(prismaMock.googleAdsConnection.update).not.toHaveBeenCalled();
   });
 
-  it('connectCustomer refuses an existing integration without OAuth credentials', async () => {
-    prismaMock.integration.findUnique.mockResolvedValue({
-      id: 'integration-1',
+  it('disconnects Google Ads connection and deletes it from database', async () => {
+    const existingConnection = {
+      id: 'connection-1',
       tenantId: 'tenant-1',
-      type: IntegrationType.GOOGLE_ADS,
-      status: IntegrationStatus.ACTIVE,
-      credentials: null,
-      metadata: null,
-      lastSyncAt: null,
-      createdAt: new Date(),
+      customerId: '1234567890',
+      refreshTokenEncrypted: encryptionService.encrypt(
+        'refresh-token-from-oauth',
+      ),
+      accessTokenEncrypted: null,
+      expiresAt: null,
+      connectedAt: new Date(),
       updatedAt: new Date(),
-    });
+      userId: null,
+      loginCustomerId: null,
+    };
 
-    await expect(
-      service.connectCustomer('tenant-1', '1234567890'),
-    ).rejects.toThrow(BadRequestException);
-    expect(prismaMock.integration.update).not.toHaveBeenCalled();
+    prismaMock.googleAdsConnection.findFirst.mockResolvedValue(
+      existingConnection,
+    );
+    prismaMock.googleAdsConnection.delete.mockResolvedValue(existingConnection);
+
+    const result = await service.disconnect('tenant-1');
+
+    expect(prismaMock.googleAdsConnection.findFirst).toHaveBeenCalledWith({
+      where: { tenantId: 'tenant-1' },
+      orderBy: { connectedAt: 'desc' },
+    });
+    expect(prismaMock.googleAdsConnection.delete).toHaveBeenCalledWith({
+      where: { id: 'connection-1' },
+    });
+    expect(result).toEqual({
+      success: true,
+      integrationId: 'connection-1',
+      status: 'DISCONNECTED',
+    });
   });
 });

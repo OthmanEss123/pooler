@@ -45,6 +45,13 @@ export class AuthService {
     );
   }
 
+  async checkEmailExists(email: string): Promise<boolean> {
+    const user = await this.prisma.user.findUnique({
+      where: { email: email.toLowerCase() },
+    });
+    return !!user;
+  }
+
   async register(dto: RegisterDto, auditContext?: AuthAuditContext) {
     const normalizedEmail = dto.email.toLowerCase();
 
@@ -102,6 +109,7 @@ export class AuthService {
             passwordHash,
             firstName: dto.firstName,
             lastName: dto.lastName,
+            avatarUrl: dto.avatarUrl,
             role: invitation.role,
           },
         });
@@ -126,6 +134,7 @@ export class AuthService {
         data: {
           name: dto.tenantName!,
           slug: dto.tenantSlug!,
+          logoUrl: dto.logoUrl,
         },
       });
 
@@ -136,6 +145,7 @@ export class AuthService {
           passwordHash,
           firstName: dto.firstName,
           lastName: dto.lastName,
+          avatarUrl: dto.avatarUrl,
           role: UserRole.OWNER,
         },
       });

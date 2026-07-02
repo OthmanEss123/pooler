@@ -89,6 +89,7 @@ model Tenant {
   isActive   Boolean                   @default(true)
   plan       BillingPlan               @default(STARTER)
   planStatus BillingSubscriptionStatus @default(ACTIVE)
+  logoUrl    String?
   createdAt  DateTime                  @default(now())
   updatedAt  DateTime                  @updatedAt
 
@@ -105,6 +106,9 @@ model Tenant {
   billingSubscription  BillingSubscription?
   invitationTokens     InvitationToken[]
 
+  googleAdsConnections GoogleAdsConnection[]
+  woocommerceConnections WooCommerceConnection[]
+
   @@map("tenants")
 }
 
@@ -115,6 +119,7 @@ model User {
   passwordHash String
   firstName    String?
   lastName     String?
+  avatarUrl    String?
   role         UserRole  @default(MEMBER)
   isActive          Boolean   @default(true)
   emailVerified     Boolean   @default(false)
@@ -562,11 +567,45 @@ model AdAudienceMember {
   @@index([contactId])
 }
 
+model GoogleAdsConnection {
+  id                    String    @id @default(uuid())
+  tenantId              String
+  userId                String?
 
+  customerId            String
+  loginCustomerId       String?
 
+  accessTokenEncrypted  String?
+  refreshTokenEncrypted String
+  expiresAt             DateTime?
 
+  connectedAt           DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
+  tenant                Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@unique([tenantId, customerId])
+  @@index([tenantId])
+  @@map("google_ads_connections")
+}
 
+model WooCommerceConnection {
+  id               String   @id @default(uuid())
 
+  tenantId         String
 
+  storeUrl         String
+
+  consumerKeyEnc   String
+  consumerSecretEnc String
+
+  webhookSecretEnc String
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("woocommerce_connections")
+}

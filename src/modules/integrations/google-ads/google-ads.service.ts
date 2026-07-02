@@ -8,8 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import {
   AdCampaignStatus,
   AdCampaignType,
-  IntegrationStatus,
-  IntegrationType,
+  GoogleAdsConnection,
   Prisma,
 } from '@prisma/client';
 import { EncryptionService } from '../../../common/services/encryption.service';
@@ -145,76 +144,52 @@ export class GoogleAdsService {
       );
     }
 
-    const existingIntegration = await this.prisma.integration.findUnique({
-      where: {
-        tenantId_type: {
-          tenantId,
-          type: IntegrationType.GOOGLE_ADS,
-        },
-      },
+    const existingConnection = await this.prisma.googleAdsConnection.findFirst({
+      where: { tenantId },
+      orderBy: { connectedAt: 'desc' },
     });
 
-    const existingMetadata =
-      existingIntegration?.metadata &&
-      typeof existingIntegration.metadata === 'object'
-        ? (existingIntegration.metadata as Prisma.JsonObject)
-        : {};
-
-    const existingCredentials = existingIntegration?.credentials
-      ? this.getDecryptedCredentials(existingIntegration.credentials)
+    const customerId = existingConnection?.customerId || 'A_DEMANDER_APRES';
+    const refreshTokenEncrypted = this.encryptionService.encrypt(
+      tokens.refresh_token,
+    );
+    const accessTokenEncrypted = tokens.access_token
+      ? this.encryptionService.encrypt(tokens.access_token)
+      : null;
+    const expiresAt = tokens.expires_in
+      ? new Date(Date.now() + tokens.expires_in * 1000)
       : null;
 
-    const encryptedCredentials = this.encryptionService.encryptJson({
-      refreshToken: tokens.refresh_token,
-      customerId:
-        existingCredentials?.customerId ||
-        (typeof existingMetadata.customerId === 'string'
-          ? existingMetadata.customerId
-          : undefined),
-    });
+    let connectionId: string;
 
-    const connectedAt =
-      typeof existingMetadata.connectedAt === 'string'
-        ? existingMetadata.connectedAt
-        : new Date().toISOString();
-
-    const integration = await this.prisma.integration.upsert({
-      where: {
-        tenantId_type: {
-          tenantId,
-          type: IntegrationType.GOOGLE_ADS,
+    if (existingConnection) {
+      const updated = await this.prisma.googleAdsConnection.update({
+        where: { id: existingConnection.id },
+        data: {
+          refreshTokenEncrypted,
+          accessTokenEncrypted,
+          expiresAt,
         },
-      },
-      update: {
-        status: IntegrationStatus.ACTIVE,
-        credentials: encryptedCredentials,
-        metadata: {
-          ...existingMetadata,
-          provider: 'google-ads',
-          connectedAt,
-          oauthCompletedAt: new Date().toISOString(),
-        } as Prisma.JsonObject,
-      },
-      create: {
-        tenantId,
-        type: IntegrationType.GOOGLE_ADS,
-        status: IntegrationStatus.ACTIVE,
-        credentials: encryptedCredentials,
-        metadata: {
-          provider: 'google-ads',
-          connectedAt,
-          oauthCompletedAt: new Date().toISOString(),
-        } as Prisma.JsonObject,
-      },
-    });
+      });
+      connectionId = updated.id;
+    } else {
+      const created = await this.prisma.googleAdsConnection.create({
+        data: {
+          tenantId,
+          customerId,
+          refreshTokenEncrypted,
+          accessTokenEncrypted,
+          expiresAt,
+        },
+      });
+      connectionId = created.id;
+    }
 
     return {
       success: true,
       tenantId,
-      integrationId: integration.id,
-      hasCustomerId: Boolean(
-        existingCredentials?.customerId || existingMetadata.customerId,
-      ),
+      integrationId: connectionId,
+      hasCustomerId: customerId !== 'A_DEMANDER_APRES',
       message:
         'Refresh token enregistre dans l integration Google Ads. Le customerId peut etre associe ensuite via connect-customer si besoin.',
     };
@@ -226,47 +201,41 @@ export class GoogleAdsService {
     }
 
     const normalizedCustomerId = this.normalizeCustomerId(customerId);
-    const encryptedCredentials = this.encryptionService.encryptJson({
-      refreshToken,
-      customerId: normalizedCustomerId,
+    const refreshTokenEncrypted = this.encryptionService.encrypt(refreshToken);
+
+    const existingConnection = await this.prisma.googleAdsConnection.findFirst({
+      where: { tenantId },
+      orderBy: { connectedAt: 'desc' },
     });
 
-    const connectedAt = new Date().toISOString();
-    const integration = await this.prisma.integration.upsert({
-      where: {
-        tenantId_type: {
-          tenantId,
-          type: IntegrationType.GOOGLE_ADS,
+    let connectionId: string;
+
+    if (existingConnection) {
+      const updated = await this.prisma.googleAdsConnection.update({
+        where: { id: existingConnection.id },
+        data: {
+          refreshTokenEncrypted,
+          customerId: normalizedCustomerId,
         },
-      },
-      update: {
-        status: IntegrationStatus.ACTIVE,
-        credentials: encryptedCredentials,
-        metadata: {
-          provider: 'google-ads',
+      });
+      connectionId = updated.id;
+    } else {
+      const created = await this.prisma.googleAdsConnection.create({
+        data: {
+          tenantId,
           customerId: normalizedCustomerId,
-          connectedAt,
-        } as Prisma.JsonObject,
-      },
-      create: {
-        tenantId,
-        type: IntegrationType.GOOGLE_ADS,
-        status: IntegrationStatus.ACTIVE,
-        credentials: encryptedCredentials,
-        metadata: {
-          provider: 'google-ads',
-          customerId: normalizedCustomerId,
-          connectedAt,
-        } as Prisma.JsonObject,
-      },
-    });
+          refreshTokenEncrypted,
+        },
+      });
+      connectionId = created.id;
+    }
 
     await this.syncQueueService.syncGoogleAds(tenantId);
 
     return {
       success: true,
-      integrationId: integration.id,
-      status: integration.status,
+      integrationId: connectionId,
+      status: 'ACTIVE',
     };
   }
 
@@ -276,80 +245,49 @@ export class GoogleAdsService {
     }
 
     const normalizedCustomerId = this.normalizeCustomerId(customerId);
-    const integration = await this.prisma.integration.findUnique({
-      where: {
-        tenantId_type: {
-          tenantId,
-          type: IntegrationType.GOOGLE_ADS,
-        },
-      },
+    const connection = await this.prisma.googleAdsConnection.findFirst({
+      where: { tenantId },
+      orderBy: { connectedAt: 'desc' },
     });
 
-    if (!integration) {
+    if (!connection) {
       throw new NotFoundException(
         'Integration Google Ads introuvable. Termine d abord le callback OAuth.',
       );
     }
 
-    const existingMetadata =
-      integration.metadata && typeof integration.metadata === 'object'
-        ? (integration.metadata as Prisma.JsonObject)
-        : {};
-
-    const credentials = this.getDecryptedCredentials(integration.credentials);
-
-    const updatedIntegration = await this.prisma.integration.update({
-      where: { id: integration.id },
+    const updatedConnection = await this.prisma.googleAdsConnection.update({
+      where: { id: connection.id },
       data: {
-        credentials: this.encryptionService.encryptJson({
-          ...credentials,
-          customerId: normalizedCustomerId,
-        }),
-        metadata: {
-          ...existingMetadata,
-          provider: 'google-ads',
-          customerId: normalizedCustomerId,
-          connectedAt:
-            typeof existingMetadata.connectedAt === 'string'
-              ? existingMetadata.connectedAt
-              : new Date().toISOString(),
-        } as Prisma.JsonObject,
+        customerId: normalizedCustomerId,
       },
     });
 
     return {
       success: true,
-      integrationId: updatedIntegration.id,
+      integrationId: updatedConnection.id,
       customerId: normalizedCustomerId,
-      status: updatedIntegration.status,
+      status: 'ACTIVE',
     };
   }
 
   async disconnect(tenantId: string) {
-    const integration = await this.getIntegration(tenantId);
+    const connection = await this.getIntegration(tenantId);
 
-    const updatedIntegration = await this.prisma.integration.update({
-      where: { id: integration.id },
-      data: {
-        status: IntegrationStatus.DISCONNECTED,
-        credentials: null,
-        metadata: {
-          provider: 'google-ads',
-          disconnectedAt: new Date().toISOString(),
-        } as Prisma.JsonObject,
-      },
+    await this.prisma.googleAdsConnection.delete({
+      where: { id: connection.id },
     });
 
     return {
       success: true,
-      integrationId: updatedIntegration.id,
-      status: updatedIntegration.status,
+      integrationId: connection.id,
+      status: 'DISCONNECTED',
     };
   }
 
   async syncCampaigns(tenantId: string) {
     const integration = await this.getActiveIntegration(tenantId);
-    const credentials = this.getDecryptedCredentials(integration.credentials);
+    const credentials = this.getDecryptedCredentials(integration);
     const accessToken = await this.getAccessToken(credentials.refreshToken);
     const customerId = this.requireCustomerId(credentials);
     const rows = await this.fetchCampaigns({
@@ -414,8 +352,8 @@ export class GoogleAdsService {
       syncedCount += 1;
     }
 
-    await this.prisma.integration.update({
-      where: { id: integration.id },
+    await this.prisma.integration.updateMany({
+      where: { tenantId, type: 'GOOGLE_ADS' },
       data: { lastSyncAt: new Date() },
     });
 
@@ -436,7 +374,7 @@ export class GoogleAdsService {
     }
 
     const integration = await this.getActiveIntegration(tenantId);
-    const credentials = this.getDecryptedCredentials(integration.credentials);
+    const credentials = this.getDecryptedCredentials(integration);
     const accessToken = await this.getAccessToken(credentials.refreshToken);
     const customerId = this.requireCustomerId(credentials);
     const rows = await this.fetchMetrics({
@@ -515,8 +453,8 @@ export class GoogleAdsService {
       syncedCount += 1;
     }
 
-    await this.prisma.integration.update({
-      where: { id: integration.id },
+    await this.prisma.integration.updateMany({
+      where: { tenantId, type: 'GOOGLE_ADS' },
       data: { lastSyncAt: new Date() },
     });
 
@@ -725,7 +663,7 @@ export class GoogleAdsService {
   private async getCampaignMutationContext(tenantId: string, id: string) {
     const campaign = await this.getCampaignById(tenantId, id);
     const integration = await this.getActiveIntegration(tenantId);
-    const credentials = this.getDecryptedCredentials(integration.credentials);
+    const credentials = this.getDecryptedCredentials(integration);
     const accessToken = await this.getAccessToken(credentials.refreshToken);
 
     return {
@@ -812,40 +750,43 @@ export class GoogleAdsService {
   }
 
   private async getIntegration(tenantId: string) {
-    const integration = await this.prisma.integration.findUnique({
-      where: {
-        tenantId_type: {
-          tenantId,
-          type: IntegrationType.GOOGLE_ADS,
-        },
-      },
+    const connection = await this.prisma.googleAdsConnection.findFirst({
+      where: { tenantId },
+      orderBy: { connectedAt: 'desc' },
     });
 
-    if (!integration) {
+    if (!connection) {
       throw new NotFoundException('Integration Google Ads introuvable');
     }
 
-    return integration;
+    return connection;
   }
 
   private async getActiveIntegration(tenantId: string) {
-    const integration = await this.getIntegration(tenantId);
+    const connection = await this.getIntegration(tenantId);
 
-    if (integration.status !== IntegrationStatus.ACTIVE) {
-      throw new BadRequestException('Integration Google Ads inactive');
+    if (!connection.refreshTokenEncrypted) {
+      throw new BadRequestException(
+        'Integration Google Ads inactive (pas de token)',
+      );
     }
 
-    return integration;
+    return connection;
   }
 
   private getDecryptedCredentials(
-    encrypted: string | null,
+    connection: GoogleAdsConnection,
   ): GoogleAdsCredentials {
-    if (!encrypted) {
+    if (!connection.refreshTokenEncrypted) {
       throw new BadRequestException('Credentials Google Ads manquants');
     }
 
-    return this.encryptionService.decryptJson<GoogleAdsCredentials>(encrypted);
+    return {
+      refreshToken: this.encryptionService.decrypt(
+        connection.refreshTokenEncrypted,
+      ),
+      customerId: connection.customerId,
+    };
   }
 
   private requireCustomerId(credentials: GoogleAdsCredentials) {
@@ -1570,7 +1511,7 @@ export class GoogleAdsService {
 
   private async getTenantGoogleAdsContext(tenantId: string) {
     const integration = await this.getActiveIntegration(tenantId);
-    const credentials = this.getDecryptedCredentials(integration.credentials);
+    const credentials = this.getDecryptedCredentials(integration);
     const accessToken = await this.getAccessToken(credentials.refreshToken);
 
     return {
